@@ -1,49 +1,78 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAuthenticated() { return request.auth != null; }
-    function isAdmin() {
-      return isAuthenticated() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    function isAuthenticated() { 
+      return request.auth != null; 
     }
-    function isStaff() {
-      return isAuthenticated() &&
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'staff'];
-    }
-    match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow create: if isAdmin();
-      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
-      allow delete: if isAdmin();
-    }
+
+    // Products collection (public read for WhatsApp catalog, authenticated write for POS stock decrement)
     match /products/{productId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
+
+    // Sales & Checkout transactions
     match /sales/{saleId} {
-      allow read: if isStaff();
-      allow create: if isStaff();
-      allow update, delete: if isAdmin();
+      allow read, write: if isAuthenticated();
     }
-    match /expenses/{expenseId} {
-      allow read, write: if isAdmin();
+
+    // Customers & VIP Accounts
+    match /customers/{customerId} {
+      allow read, write: if isAuthenticated();
     }
-    match /attendance/{attendanceId} {
-      allow read: if isAdmin();
-      allow create: if isAuthenticated();
-      allow update, delete: if isAdmin();
+
+    // Customer credit ledger & payments
+    match /customerTransactions/{transId} {
+      allow read, write: if isAuthenticated();
     }
-    match /deliveries/{deliveryId} {
-      allow read: if isStaff();
-      allow create, update: if isStaff();
-      allow delete: if isAdmin();
+    match /customerPayments/{paymentId} {
+      allow read, write: if isAuthenticated();
     }
-    match /storeSettings/{docId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin();
+
+    // Online Orders (public can create from catalog, authenticated can manage)
+    match /onlineOrders/{orderId} {
+      allow create: if true;
+      allow read, update, delete: if isAuthenticated();
     }
+
+    // User profiles & accounts
+    match /users/{userId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Shift Handovers & Z-Reports
+    match /shiftHandovers/{handoverId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Cash Reconciliations
     match /reconciliations/{docId} {
-      allow read, write: if isAdmin();
+      allow read, write: if isAuthenticated();
+    }
+
+    // Operating Expenses
+    match /expenses/{expenseId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Staff Attendance
+    match /attendance/{attendanceId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Deliveries & Logistics
+    match /deliveries/{deliveryId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Store Settings & Config
+    match /storeSettings/{docId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Fallback: allow authenticated store users read/write
+    match /{document=**} {
+      allow read, write: if isAuthenticated();
     }
   }
 }

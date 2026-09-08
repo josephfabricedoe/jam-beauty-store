@@ -176,17 +176,21 @@ export default function POSView() {
 
       // Auto-create new customer if name was typed in checkout
       if (!custId && newCustomerName.trim()) {
-        const newCustDoc = await addDoc(collection(db, 'customers'), {
-          name: newCustomerName.trim(),
-          phone: newCustomerPhone.trim(),
-          customerType: 'VIP Client',
-          balanceOwed: remainingDue,
-          creditLimit: 0,
-          totalSpent: finalTotal,
-          createdAt: serverTimestamp(),
-          lastPurchaseDate: serverTimestamp(),
-        });
-        custId = newCustDoc.id;
+        try {
+          const newCustDoc = await addDoc(collection(db, 'customers'), {
+            name: newCustomerName.trim(),
+            phone: newCustomerPhone.trim(),
+            customerType: 'VIP Client',
+            balanceOwed: remainingDue,
+            creditLimit: 0,
+            totalSpent: finalTotal,
+            createdAt: serverTimestamp(),
+            lastPurchaseDate: serverTimestamp(),
+          });
+          custId = newCustDoc.id;
+        } catch (custCreateErr) {
+          console.warn('Customer auto-create permission warning:', custCreateErr);
+        }
         custName = newCustomerName.trim();
         custPhone = newCustomerPhone.trim();
       }

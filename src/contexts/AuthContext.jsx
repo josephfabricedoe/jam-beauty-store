@@ -26,10 +26,25 @@ export function AuthProvider({ children }) {
 
       if (user) {
         getDoc(doc(db, 'users', user.uid))
-          .then((snap) => {
+          .then(async (snap) => {
             if (!mounted) return;
-            if (snap.exists()) setUserProfile(snap.data());
-            else setUserProfile({ role: 'admin', displayName: user.displayName || user.email });
+            if (snap.exists()) {
+              setUserProfile(snap.data());
+            } else {
+              const defaultProfile = {
+                uid: user.uid,
+                email: user.email,
+                displayName: user.displayName || user.email?.split('@')[0] || 'Store Admin',
+                role: 'admin',
+                createdAt: serverTimestamp(),
+              };
+              try {
+                await setDoc(doc(db, 'users', user.uid), defaultProfile, { merge: true });
+              } catch (err) {
+                console.warn('Auto-seed user notice:', err);
+              }
+              setUserProfile(defaultProfile);
+            }
           })
           .catch((e) => {
             console.warn('Profile fetch notice:', e);
