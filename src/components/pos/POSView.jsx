@@ -7,8 +7,9 @@ import { useCurrency } from '../../hooks/useCurrency';
 import BarcodeScanner from './BarcodeScanner';
 import Cart from './Cart';
 import ReceiptModal from './ReceiptModal';
+import ReceiptsHistoryModal from './ReceiptsHistoryModal';
 import { getPriceForMode } from './PricingModeSwitcher';
-import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth, X } from 'lucide-react';
+import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth, X, Receipt } from 'lucide-react';
 import { connectBluetoothPrinter, getConnectedPrinterName } from '../../utils/bluetoothPrinter';
 
 export default function POSView() {
@@ -30,6 +31,7 @@ export default function POSView() {
   const [amountPaid, setAmountPaid] = useState('');
   const [completedSale, setCompletedSale] = useState(null);
   const [receiptOpen, setReceiptOpen] = useState(false);
+  const [receiptsHistoryOpen, setReceiptsHistoryOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [lastAddedProduct, setLastAddedProduct] = useState(null);
   const [btPrinter, setBtPrinter] = useState(getConnectedPrinterName());
@@ -457,24 +459,35 @@ export default function POSView() {
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-2">
             <ShoppingBag className="w-4 h-4 text-rose-400" /> Current Cart
           </h2>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const conn = await connectBluetoothPrinter();
-                setBtPrinter(conn.name);
-              } catch (e) {
-                alert(e.message);
-              }
-            }}
-            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs transition-colors"
-            title="Connect 58mm Portable Thermal Printer"
-          >
-            <Bluetooth className={`w-3.5 h-3.5 ${btPrinter ? 'text-emerald-400' : 'text-[#efaa9b]'}`} />
-            <span className="text-[11px] text-slate-300">
-              {btPrinter ? btPrinter : 'Connect 58mm Printer'}
-            </span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setReceiptsHistoryOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs transition-colors text-slate-300 hover:text-white"
+              title="Look up all past sales receipts, credit debts, and dispute archive"
+            >
+              <Receipt className="w-3.5 h-3.5 text-[#efaa9b]" />
+              <span className="text-[11px]">Past Receipts</span>
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const conn = await connectBluetoothPrinter();
+                  setBtPrinter(conn.name);
+                } catch (e) {
+                  alert(e.message);
+                }
+              }}
+              className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs transition-colors"
+              title="Connect 58mm Portable Thermal Printer"
+            >
+              <Bluetooth className={`w-3.5 h-3.5 ${btPrinter ? 'text-emerald-400' : 'text-[#efaa9b]'}`} />
+              <span className="text-[11px] text-slate-300">
+                {btPrinter ? btPrinter : '58mm Printer'}
+              </span>
+            </button>
+          </div>
         </div>
         <Cart
           items={cartItems}
@@ -759,6 +772,7 @@ export default function POSView() {
       )}
 
       <ReceiptModal isOpen={receiptOpen} onClose={() => setReceiptOpen(false)} sale={completedSale} />
+      <ReceiptsHistoryModal isOpen={receiptsHistoryOpen} onClose={() => setReceiptsHistoryOpen(false)} />
     </div>
   );
 }
