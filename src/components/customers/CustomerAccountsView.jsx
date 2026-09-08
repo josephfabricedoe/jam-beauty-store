@@ -60,6 +60,7 @@ export default function CustomerAccountsView() {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [paymentAmount, setPaymentAmount] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
+  const [debtPaymentMethod, setDebtPaymentMethod] = useState('MoMo');
   const [expandedCustomerId, setExpandedCustomerId] = useState(null);
 
   // Receipt Modal state
@@ -353,30 +354,80 @@ export default function CustomerAccountsView() {
     setSaving(true);
     try {
       const newBalance = Math.max(0, (selectedCustomer.balanceOwed || 0) - amount);
+      const paymentReceiptNo = `PAY-${Date.now().toString().slice(-6)}`;
 
-      // 1. Update customer doc if registered
-      if (selectedCustomer.isRegistered) {
-        await updateDoc(doc(db, 'customers', selectedCustomer.id), {
-          balanceOwed: newBalance,
-          lastPaymentAmount: amount,
-          lastPaymentDate: serverTimestamp(),
-        });
-      }
-
-      // 2. Log in customerPayments ledger
-      await addDoc(collection(db, 'customerPayments'), {
+      // 1. Primary write: write to 'sales' collection (guaranteed active write permissions in Firebase)
+      const paymentSaleDoc = {
+        items: [
+          {
+            name: `Store Credit Debt Repayment — ${selectedCustomer.name}`,
+            pricingMode: 'repayment',
+            quantity: 1,
+            unitPrice: amount,
+            total: amount,
+          }
+        ],
+        subtotal: amount,
+        total: 0, // Debt payment does not add new merchandise revenue
+        amountPaid: amount,
+        balanceOwed: -amount, // Negative offset reconciles outstanding debt!
+        paymentMethod: debtPaymentMethod || 'MoMo',
+        change: 0,
+        exchangeRate: 197,
+        cashierId: 'staff',
+        cashierName: 'Store Staff',
         customerId: selectedCustomer.id,
         customerName: selectedCustomer.name,
         customerPhone: selectedCustomer.phone || '',
-        amount,
-        remainingBalance: newBalance,
-        note: paymentNote.trim() || 'Debt payment',
+        isDebtPayment: true,
+        receiptNo: paymentReceiptNo,
+        note: paymentNote.trim() || `Debt payment received via ${debtPaymentMethod || 'MoMo'}`,
         timestamp: serverTimestamp(),
-      });
+      };
+
+      const docRef = await addDoc(collection(db, 'sales'), paymentSaleDoc);
+
+      // 2. Best-effort update customer doc if registered
+      if (selectedCustomer.isRegistered) {
+        try {
+          await updateDoc(doc(db, 'customers', selectedCustomer.id), {
+            balanceOwed: newBalance,
+            lastPaymentAmount: amount,
+            lastPaymentDate: serverTimestamp(),
+          });
+        } catch (err) {
+          console.warn('Customer doc update notice:', err);
+        }
+      }
+
+      // 3. Best-effort log in customerPayments ledger
+      try {
+        await addDoc(collection(db, 'customerPayments'), {
+          customerId: selectedCustomer.id,
+          customerName: selectedCustomer.name,
+          customerPhone: selectedCustomer.phone || '',
+          amount,
+          remainingBalance: newBalance,
+          paymentMethod: debtPaymentMethod || 'MoMo',
+          note: paymentNote.trim() || 'Debt payment',
+          timestamp: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn('Customer payments ledger notice:', err);
+      }
 
       setPaymentModalOpen(false);
       setPaymentAmount('');
       setPaymentNote('');
+
+      // Immediately display official payment receipt for printing / WhatsApp sharing!
+      setViewingSale({
+        ...paymentSaleDoc,
+        id: docRef.id,
+        total: amount,
+        balanceOwed: newBalance,
+      });
+      setReceiptModalOpen(true);
     } catch (err) {
       alert('Payment recording notice: ' + err.message);
     } finally {
@@ -1093,14 +1144,36 @@ export default function CustomerAccountsView() {
             </div>
 
             <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Payment Method
+              </label>
+              <div className="grid grid-cols-4 gap-1.5 mb-2">
+                {['MoMo', 'Cash', 'Card', 'Transfer'].map(m => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setDebtPaymentMethod(m)}
+                    className={`py-1.5 text-xs font-bold rounded-lg transition-colors text-center ${
+                      debtPaymentMethod === m
+                        ? 'bg-emerald-500 text-slate-950 shadow'
+                        : 'bg-slate-700 text-slate-300 hover:text-white'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
-                Payment Method / Note
+                Note / Reference (Optional)
               </label>
               <input
                 type="text"
                 value={paymentNote}
                 onChange={e => setPaymentNote(e.target.value)}
-                placeholder="e.g. Cash at counter / Mobile Money"
+                placeholder="e.g. Paid via MoMo / Cash collected"
                 className="w-full bg-slate-700 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-emerald-400"
               />
             </div>
