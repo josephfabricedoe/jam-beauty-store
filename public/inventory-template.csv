@@ -1,0 +1,6 @@
+barcode,name,category,retailPrice,halfDozenPrice,dozenPrice,costPrice,showroomQty,storeroomQty,reorderTrigger
+6001234567890,Chanel No.5 EDP 100ml,Perfume,45.00,40.00,35.00,22.00,10,20,5
+6009876543210,MAC Ruby Woo Lipstick,Cosmetics,18.00,16.00,14.00,8.00,15,30,5
+6005551234567,Neutrogena Face Wash 200ml,Skincare,12.00,10.00,9.00,5.00,20,40,10
+6007777777777,OGX Argan Oil Shampoo 385ml,Haircare,8.50,7.50,6.50,3.50,12,24,6
+6008888888888,Victoria Secret Body Lotion,Body Care,15.00,13.00,11.00,7.00,8,16,5

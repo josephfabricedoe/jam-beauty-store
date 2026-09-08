@@ -1,0 +1,5 @@
+date,productName,barcode,quantity,unitPrice,total,paymentMethod,cashierName,note
+2026-09-01,Chanel No.5 EDP 100ml,6001234567890,2,45.00,90.00,Cash,Jane,
+2026-09-01,MAC Ruby Woo Lipstick,6009876543210,3,18.00,54.00,MoMo,Jane,
+2026-09-02,Neutrogena Face Wash 200ml,6005551234567,1,12.00,12.00,Cash,John,
+2026-09-03,OGX Argan Oil Shampoo 385ml,6007777777777,2,8.50,17.00,Cash,Jane,Wholesale order

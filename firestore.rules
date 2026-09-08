@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAuthenticated() { return request.auth != null; }
+    function isAdmin() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    function isStaff() {
+      return isAuthenticated() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'staff'];
+    }
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+      allow delete: if isAdmin();
+    }
+    match /products/{productId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    match /sales/{saleId} {
+      allow read: if isStaff();
+      allow create: if isStaff();
+      allow update, delete: if isAdmin();
+    }
+    match /expenses/{expenseId} {
+      allow read, write: if isAdmin();
+    }
+    match /attendance/{attendanceId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if isAdmin();
+    }
+    match /deliveries/{deliveryId} {
+      allow read: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+    match /storeSettings/{docId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+    match /reconciliations/{docId} {
+      allow read, write: if isAdmin();
+    }
+  }
+}
