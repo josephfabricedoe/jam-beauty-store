@@ -1,7 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import DateFilterBar, { getDateRange } from './DateFilterBar';
+import DateFilterBar, {
+  filterItemsByPeriod,
+  stepPeriodDate,
+  getPeriodFormattedLabel
+} from './DateFilterBar';
 import SummaryMetrics from './SummaryMetrics';
 import SalesInflow from './SalesInflow';
 import ExpenseForm from './ExpenseForm';
@@ -23,59 +27,66 @@ const TABS = [
 ];
 
 export default function FinanceView() {
-  const [preset, setPreset] = useState('all');
+  // Unified single source of truth for time/date filtering across all tabs
+  const [periodMode, setPeriodMode] = useState('month'); // default to 'month'
+  const [selectedDate, setSelectedDate] = useState(new Date());
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
-  const [sales, setSales] = useState([]);
-  const [expenses, setExpenses] = useState([]);
-  const [deliveries, setDeliveries] = useState([]);
+
+  const [rawSales, setRawSales] = useState([]);
+  const [rawExpenses, setRawExpenses] = useState([]);
+  const [rawDeliveries, setRawDeliveries] = useState([]);
   const [activeTab, setActiveTab] = useState('detailed');
 
-  const { from, to } = getDateRange(preset, customFrom, customTo);
+  // Step backward or forward in time
+  const stepDate = (offset) => {
+    setSelectedDate(prev => stepPeriodDate(prev, periodMode, offset));
+  };
+
+  // Real-time Firestore Listeners with error protection
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(db, 'sales'), orderBy('timestamp', 'desc')),
+      snap => setRawSales(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => console.warn('Sales listener notice:', err)
+    );
+    return unsub;
+  }, []);
 
   useEffect(() => {
-    let q;
-    if (preset === 'all') {
-      q = query(collection(db, 'sales'), orderBy('timestamp', 'desc'));
-    } else {
-      q = query(
-        collection(db, 'sales'),
-        where('timestamp', '>=', Timestamp.fromDate(from)),
-        where('timestamp', '<=', Timestamp.fromDate(to)),
-        orderBy('timestamp', 'desc')
-      );
-    }
-    return onSnapshot(q, snap => setSales(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  }, [preset, customFrom, customTo]);
+    const unsub = onSnapshot(
+      query(collection(db, 'expenses'), orderBy('timestamp', 'desc')),
+      snap => setRawExpenses(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => console.warn('Expenses listener notice:', err)
+    );
+    return unsub;
+  }, []);
 
   useEffect(() => {
-    let q;
-    if (preset === 'all') {
-      q = query(collection(db, 'expenses'), orderBy('timestamp', 'desc'));
-    } else {
-      q = query(
-        collection(db, 'expenses'),
-        where('timestamp', '>=', Timestamp.fromDate(from)),
-        where('timestamp', '<=', Timestamp.fromDate(to)),
-        orderBy('timestamp', 'desc')
-      );
-    }
-    return onSnapshot(q, snap => setExpenses(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  }, [preset, customFrom, customTo]);
+    const unsub = onSnapshot(
+      query(collection(db, 'deliveries'), orderBy('timestamp', 'desc')),
+      snap => setRawDeliveries(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+      err => console.warn('Deliveries listener notice:', err)
+    );
+    return unsub;
+  }, []);
 
-  useEffect(() => {
-    let q;
-    if (preset === 'all') {
-      q = query(collection(db, 'deliveries'), orderBy('timestamp', 'desc'));
-    } else {
-      q = query(
-        collection(db, 'deliveries'),
-        where('timestamp', '>=', Timestamp.fromDate(from)),
-        where('timestamp', '<=', Timestamp.fromDate(to))
-      );
-    }
-    return onSnapshot(q, snap => setDeliveries(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-  }, [preset, customFrom, customTo]);
+  // Filter raw collections by the unified period (synchronizing all components)
+  const sales = useMemo(() => {
+    return filterItemsByPeriod(rawSales, periodMode, selectedDate, customFrom, customTo);
+  }, [rawSales, periodMode, selectedDate, customFrom, customTo]);
+
+  const expenses = useMemo(() => {
+    return filterItemsByPeriod(rawExpenses, periodMode, selectedDate, customFrom, customTo);
+  }, [rawExpenses, periodMode, selectedDate, customFrom, customTo]);
+
+  const deliveries = useMemo(() => {
+    return filterItemsByPeriod(rawDeliveries, periodMode, selectedDate, customFrom, customTo);
+  }, [rawDeliveries, periodMode, selectedDate, customFrom, customTo]);
+
+  const formattedPeriodLabel = useMemo(() => {
+    return getPeriodFormattedLabel(periodMode, selectedDate, customFrom, customTo);
+  }, [periodMode, selectedDate, customFrom, customTo]);
 
   // Exact Financial Calculations
   const posSalesTotal = sales.reduce((s, sale) => s + (sale.total || 0), 0);
@@ -95,12 +106,6 @@ export default function FinanceView() {
     .reduce((s, d) => s + (d.charge || 0), 0);
 
   const expectedDrawerCash = (cashSales + cashDeliveries) - totalExpenses;
-
-  const dateLabel = preset === 'custom'
-    ? `${customFrom} to ${customTo}`
-    : preset === 'all'
-      ? 'All Time'
-      : preset.charAt(0).toUpperCase() + preset.slice(1);
 
   const handleExportExpensesCSV = () => {
     const data = expenses.map(e => {
@@ -135,7 +140,7 @@ export default function FinanceView() {
     const netMargin = grossRevenue > 0 ? ((netIncome / grossRevenue) * 100).toFixed(1) : '0.0';
 
     const summaryRows = [
-      { metric: 'Report Period', value: dateLabel },
+      { metric: 'Report Period', value: formattedPeriodLabel },
       { metric: 'Store POS Sales ($)', value: posSalesTotal.toFixed(2) },
       { metric: 'Delivery Service Revenue ($)', value: deliveryIncome.toFixed(2) },
       { metric: 'Total Gross Revenue ($)', value: grossRevenue.toFixed(2) },
@@ -157,27 +162,33 @@ export default function FinanceView() {
 
   return (
     <div className="p-4 space-y-4">
-      {/* Date Filter Bar */}
-      <DateFilterBar
-        preset={preset}
-        setPreset={setPreset}
-        customFrom={customFrom}
-        setCustomFrom={setCustomFrom}
-        customTo={customTo}
-        setCustomTo={setCustomTo}
-      />
-
-      {/* Synchronized Summary Cards */}
+      {/* 1. Synchronized Summary Cards (100% in sync with selected period) */}
       <SummaryMetrics sales={sales} expenses={expenses} deliveries={deliveries} />
 
-      {/* Tabs & Blind Drawer Cash Reconciliation */}
+      {/* 2. Unified Filter Bar shown on non-detailed tabs so all views stay in sync */}
+      {activeTab !== 'detailed' && (
+        <DateFilterBar
+          periodMode={periodMode}
+          setPeriodMode={setPeriodMode}
+          selectedDate={selectedDate}
+          setSelectedDate={setSelectedDate}
+          stepDate={stepDate}
+          formattedLabel={formattedPeriodLabel}
+          customFrom={customFrom}
+          setCustomFrom={setCustomFrom}
+          customTo={customTo}
+          setCustomTo={setCustomTo}
+        />
+      )}
+
+      {/* 3. Navigation Tabs & Financial Actions */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex gap-1 bg-slate-800 p-1 rounded-xl">
+        <div className="flex gap-1 bg-slate-800 p-1 rounded-xl overflow-x-auto">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
                 activeTab === id ? 'bg-[#efaa9b] text-[#45150b] font-bold shadow' : 'text-slate-400 hover:text-white'
               }`}
             >
@@ -203,22 +214,32 @@ export default function FinanceView() {
             cashSales={cashSales}
             deliveryCash={cashDeliveries}
             expenses={totalExpenses}
-            dateLabel={dateLabel}
+            dateLabel={formattedPeriodLabel}
           />
         </div>
       </div>
 
-      {/* Detailed Store Performance Report (Screenshot Model) */}
+      {/* 4. Tab 1: Detailed Store Performance Deep Report */}
       {activeTab === 'detailed' && (
-        <DetailedStoreReport sales={sales} expenses={expenses} deliveries={deliveries} />
+        <DetailedStoreReport
+          sales={sales}
+          expenses={expenses}
+          deliveries={deliveries}
+          periodMode={periodMode}
+          setPeriodMode={setPeriodMode}
+          selectedDate={selectedDate}
+          setSelectedDate={setSelectedDate}
+          stepDate={stepDate}
+          formattedPeriodLabel={formattedPeriodLabel}
+        />
       )}
 
-      {/* Overview & Sales Ledger */}
+      {/* 5. Tab 2: Overview & Sales Ledger */}
       {activeTab === 'overview' && (
         <SalesInflow sales={sales} deliveries={deliveries} />
       )}
 
-      {/* Visual Analytics Charts */}
+      {/* 6. Tab 3: Visual Analytics Charts */}
       {activeTab === 'charts' && (
         <div className="space-y-4">
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
@@ -246,7 +267,7 @@ export default function FinanceView() {
         </div>
       )}
 
-      {/* Expenses Tab */}
+      {/* 7. Tab 4: Expenses Tab */}
       {activeTab === 'expenses' && (
         <div className="space-y-4">
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
@@ -302,13 +323,13 @@ export default function FinanceView() {
         </div>
       )}
 
-      {/* Sales Spreadsheet Import Tab */}
+      {/* 8. Tab 5: Sales Spreadsheet Import Tab */}
       {activeTab === 'import' && (
         <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-5">
           <SalesImport
             onImportComplete={() => {
-              setPreset('all');
-              setActiveTab('overview');
+              setPeriodMode('all');
+              setActiveTab('detailed');
             }}
           />
         </div>
