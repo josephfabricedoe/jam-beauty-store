@@ -39,6 +39,7 @@ function cleanWhatsAppPhone(phone) {
 export default function CustomerCatalog({ onGoToLogin }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [activeSubCategory, setActiveSubCategory] = useState('All');
   const { exchangeRate, storeSettings } = useApp();
