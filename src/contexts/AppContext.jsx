@@ -13,13 +13,19 @@ export function AppProvider({ children }) {
   const [storeSettings, setStoreSettings] = useState({ storeName: 'JAM Beauty Store', address: '', phone: '' });
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'storeSettings', 'config'), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        setExchangeRate(data.exchangeRate || 197);
-        setStoreSettings(data);
+    const unsub = onSnapshot(
+      doc(db, 'storeSettings', 'config'),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          setExchangeRate(data.exchangeRate || 197);
+          setStoreSettings(data);
+        }
+      },
+      (err) => {
+        console.warn('Store settings listener notice:', err.message || err);
       }
-    });
+    );
     return unsub;
   }, []);
 

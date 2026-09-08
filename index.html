@@ -17,10 +17,65 @@
         body > * { display: none !important; }
         #receipt-print-root { display: block !important; }
       }
+      .pre-loader {
+        min-height: 100vh;
+        background-color: #0f172a;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        color: #fff;
+        padding: 24px;
+        text-align: center;
+      }
+      .spinner {
+        width: 44px;
+        height: 44px;
+        border: 4px solid rgba(239, 170, 155, 0.2);
+        border-top-color: #efaa9b;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        margin-bottom: 20px;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
     </style>
+    <script>
+      // Automatically force service worker updates across multiple open tabs
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(regs) {
+          for (let reg of regs) {
+            reg.update();
+          }
+        });
+      }
+      // Safety handler for any uncaught initialization error
+      window.addEventListener('error', function(e) {
+        console.warn('Initialization notice:', e.message || e);
+        var root = document.getElementById('root');
+        var errBox = document.getElementById('init-error-action');
+        if (errBox) {
+          errBox.style.display = 'block';
+        }
+      });
+    </script>
   </head>
-  <body>
-    <div id="root"></div>
+  <body class="bg-slate-900 text-slate-100">
+    <div id="root">
+      <div class="pre-loader">
+        <div class="spinner"></div>
+        <h2 style="font-size:17px;font-weight:700;letter-spacing:0.05em;margin:0 0 6px 0;color:#ffffff;">JAM BEAUTY STORE</h2>
+        <p style="font-size:13px;color:#94a3b8;margin:0 0 16px 0;">Loading application...</p>
+        <div id="init-error-action" style="display:none;margin-top:12px;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:16px;max-width:320px;">
+          <p style="font-size:12px;color:#fca5a5;margin:0 0 10px 0;">Browser is using an older cached version.</p>
+          <button onclick="if('caches' in window){caches.keys().then(function(k){k.forEach(function(n){caches.delete(n);});});}if('serviceWorker' in navigator){navigator.serviceWorker.getRegistrations().then(function(r){r.forEach(function(w){w.unregister();});});}localStorage.removeItem('jam_beauty_cart');window.location.reload(true);" style="background:#efaa9b;color:#45150b;font-weight:bold;font-size:12px;padding:8px 16px;border-radius:8px;border:none;cursor:pointer;">
+            Tap Here to Refresh App
+          </button>
+        </div>
+      </div>
+    </div>
     <div id="receipt-print-root" style="display:none;"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

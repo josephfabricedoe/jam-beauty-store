@@ -13,10 +13,17 @@ export default function StaffView() {
   const { currentUser } = useAuth();
 
   useEffect(() => {
-    return onSnapshot(collection(db, 'users'), snap => {
-      setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    });
+    return onSnapshot(
+      collection(db, 'users'),
+      (snap) => {
+        setStaff(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => {
+        console.warn('Users listener notice:', err.message || err);
+        setLoading(false);
+      }
+    );
   }, []);
 
   const toggleActive = (member) =>

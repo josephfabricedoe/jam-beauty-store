@@ -65,10 +65,17 @@ export default function CustomerCatalog({ onGoToLogin }) {
   const storeHours = storeSettings?.storeHours || 'Mon - Sat: 8:30 AM - 6:30 PM';
 
   useEffect(() => {
-    return onSnapshot(collection(db, 'products'), snap => {
-      setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      setLoading(false);
-    });
+    return onSnapshot(
+      collection(db, 'products'),
+      (snap) => {
+        setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      },
+      (err) => {
+        console.warn('Products listener notice:', err.message || err);
+        setLoading(false);
+      }
+    );
   }, []);
 
   useEffect(() => {

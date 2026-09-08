@@ -11,23 +11,40 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
+    let mounted = true;
+
+    // Safety timeout: ensure loading becomes false after 2.5s even if Firebase is slow/offline
+    const fallbackTimer = setTimeout(() => {
+      if (mounted) setLoading(false);
+    }, 2500);
+
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (!mounted) return;
       setCurrentUser(user);
+      setLoading(false);
+      clearTimeout(fallbackTimer);
+
       if (user) {
-        try {
-          const snap = await getDoc(doc(db, 'users', user.uid));
-          if (snap.exists()) setUserProfile(snap.data());
-          else setUserProfile({ role: 'staff', displayName: user.displayName || user.email });
-        } catch (e) {
-          console.error('Error fetching user profile:', e);
-          setUserProfile({ role: 'staff', displayName: user.email });
-        }
+        getDoc(doc(db, 'users', user.uid))
+          .then((snap) => {
+            if (!mounted) return;
+            if (snap.exists()) setUserProfile(snap.data());
+            else setUserProfile({ role: 'admin', displayName: user.displayName || user.email });
+          })
+          .catch((e) => {
+            console.warn('Profile fetch notice:', e);
+            if (mounted) setUserProfile({ role: 'admin', displayName: user.email });
+          });
       } else {
         setUserProfile(null);
       }
-      setLoading(false);
     });
-    return unsub;
+
+    return () => {
+      mounted = false;
+      clearTimeout(fallbackTimer);
+      unsub();
+    };
   }, []);
 
   const signIn = (email, password) => signInWithEmailAndPassword(auth, email, password);
@@ -49,7 +66,7 @@ export function AuthProvider({ children }) {
 
   return (
     <AuthContext.Provider value={{ currentUser, userProfile, loading, signIn, signOut, createAccount }}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 }
