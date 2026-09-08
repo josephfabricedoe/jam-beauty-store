@@ -8,16 +8,23 @@ import {
   Truck, Plus, Minus, Trash2, ArrowRight, CheckCircle2
 } from 'lucide-react';
 
-const CATEGORIES = [
+export const CATEGORIES = [
   { id: 'All', label: 'ALL' },
   { id: 'Perfume', label: 'PERFUME' },
   { id: 'Hair', label: 'HAIR' },
-  { id: 'Skincare', label: 'SKINCARE' },
   { id: 'Body Lotion', label: 'BODY LOTION' },
   { id: 'Body Oil', label: 'BODY OIL' },
-  { id: 'Cosmetics', label: 'COSMETICS' },
-  { id: 'Accessories', label: 'ACCESSORIES' },
+  { id: 'Other Products', label: 'OTHER PRODUCTS' },
 ];
+
+export function getProductPrimaryCategory(product) {
+  const cat = (product.category || product.type || '').trim().toLowerCase();
+  if (cat.includes('perfume') || cat.includes('fragrance') || cat.includes('cologne')) return 'Perfume';
+  if (cat.includes('hair')) return 'Hair';
+  if (cat.includes('body lotion') || (cat.includes('lotion') && !cat.includes('oil'))) return 'Body Lotion';
+  if (cat.includes('body oil') || (cat.includes('oil') && !cat.includes('hair') && !cat.includes('lotion'))) return 'Body Oil';
+  return 'Other Products';
+}
 
 function cleanWhatsAppPhone(phone) {
   let cleaned = (phone || '0778433270').replace(/[^0-9]/g, '');
@@ -32,8 +39,8 @@ function cleanWhatsAppPhone(phone) {
 export default function CustomerCatalog({ onGoToLogin }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
+  const [activeSubCategory, setActiveSubCategory] = useState('All');
   const { exchangeRate, storeSettings } = useApp();
 
   // Multi-item Shopping Cart with localStorage persistence
@@ -126,12 +133,44 @@ export default function CustomerCatalog({ onGoToLogin }) {
   const totalCartUSD = cart.reduce((sum, item) => sum + (Number(item.product.retailPrice || 0) * item.quantity), 0);
   const totalCartLRD = (totalCartUSD * (exchangeRate || 197)).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
+  // Dynamically extract all distinct types/categories for products grouped under "Other Products"
+  const otherSubCategories = React.useMemo(() => {
+    const map = new Map();
+    products.forEach(p => {
+      if (getProductPrimaryCategory(p) === 'Other Products') {
+        let sub = (p.category || p.type || '').trim();
+        if (!sub || sub.toLowerCase() === 'other' || sub.toLowerCase() === 'other products') {
+          sub = 'General';
+        } else {
+          sub = sub.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        }
+        map.set(sub, (map.get(sub) || 0) + 1);
+      }
+    });
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [products]);
+
   // Filtering products
   const filtered = products.filter(p => {
-    const pCat = (p.category || 'Other').toLowerCase();
-    const activeCatLower = activeCategory.toLowerCase();
-    const matchesCat = activeCategory === 'All' || pCat === activeCatLower || (activeCategory === 'Hair' && pCat.includes('hair'));
-    if (!matchesCat) return false;
+    const primaryCat = getProductPrimaryCategory(p);
+
+    if (activeCategory !== 'All') {
+      if (activeCategory === 'Other Products') {
+        if (primaryCat !== 'Other Products') return false;
+        if (activeSubCategory !== 'All') {
+          let pSub = (p.category || p.type || '').trim();
+          if (!pSub || pSub.toLowerCase() === 'other' || pSub.toLowerCase() === 'other products') {
+            pSub = 'General';
+          }
+          if (pSub.toLowerCase() !== activeSubCategory.toLowerCase()) return false;
+        }
+      } else {
+        if (primaryCat !== activeCategory) return false;
+      }
+    }
+
     if (!searchTerm.trim()) return true;
     const q = searchTerm.toLowerCase();
     return (
@@ -318,6 +357,7 @@ export default function CustomerCatalog({ onGoToLogin }) {
                 key={cat.id}
                 onClick={() => {
                   setActiveCategory(cat.id);
+                  setActiveSubCategory('All');
                   scrollToCatalog();
                 }}
                 className={`text-[11px] font-medium tracking-[0.18em] transition-all whitespace-nowrap pb-0.5 border-b-2 ${
@@ -330,6 +370,42 @@ export default function CustomerCatalog({ onGoToLogin }) {
               </button>
             ))}
           </div>
+
+          {/* Sub-categories bar for Other Products (Dynamically populated from uploaded spreadsheet categories) */}
+          {activeCategory === 'Other Products' && otherSubCategories.length > 0 && (
+            <div className="bg-[#fcfaf7] border-t border-[#ede6dc] py-2 px-4">
+              <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 overflow-x-auto scrollbar-none">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mr-1 flex-shrink-0">
+                  Type:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubCategory('All')}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                    activeSubCategory === 'All'
+                      ? 'bg-[#45150b] text-white shadow-sm'
+                      : 'bg-white text-stone-600 border border-stone-200 hover:border-stone-400'
+                  }`}
+                >
+                  All ({products.filter(p => getProductPrimaryCategory(p) === 'Other Products').length})
+                </button>
+                {otherSubCategories.map(sub => (
+                  <button
+                    key={sub.name}
+                    type="button"
+                    onClick={() => setActiveSubCategory(sub.name)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                      activeSubCategory.toLowerCase() === sub.name.toLowerCase()
+                        ? 'bg-[#45150b] text-white shadow-sm'
+                        : 'bg-white text-stone-600 border border-stone-200 hover:border-stone-400'
+                    }`}
+                  >
+                    {sub.name} ({sub.count})
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
@@ -419,18 +495,21 @@ export default function CustomerCatalog({ onGoToLogin }) {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
           {[
             { id: 'Perfume', title: 'Perfume', subtitle: 'Luxury Fragrance' },
             { id: 'Hair', title: 'Hair', subtitle: 'Bundles & Care' },
-            { id: 'Skincare', title: 'Skincare', subtitle: 'Glow & Hydrate' },
             { id: 'Body Lotion', title: 'Body Lotion', subtitle: 'Silky Moisture' },
             { id: 'Body Oil', title: 'Body Oil', subtitle: 'Scented Glow' },
-            { id: 'Cosmetics', title: 'Cosmetics', subtitle: 'Lips, Eyes & Face' },
+            { id: 'Other Products', title: 'Other Products', subtitle: 'Explore All Categories' },
           ].map(cat => (
             <button
               key={cat.id}
-              onClick={() => { setActiveCategory(cat.id); scrollToCatalog(); }}
+              onClick={() => {
+                setActiveCategory(cat.id);
+                setActiveSubCategory('All');
+                scrollToCatalog();
+              }}
               className={`text-left p-4 rounded-xl border transition-all flex flex-col justify-between group ${
                 activeCategory === cat.id
                   ? 'bg-white border-[#45150b] shadow-md ring-1 ring-[#45150b]/20'
@@ -458,7 +537,11 @@ export default function CustomerCatalog({ onGoToLogin }) {
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eee7de] pb-4 mb-6">
           <div>
             <h4 className="font-serif text-xl text-stone-900">
-              {activeCategory === 'All' ? 'All Beauty Essentials' : activeCategory}
+              {activeCategory === 'All'
+                ? 'All Beauty Essentials'
+                : activeCategory === 'Other Products'
+                  ? (activeSubCategory === 'All' ? 'Other Products' : `Other Products · ${activeSubCategory}`)
+                  : activeCategory}
             </h4>
             <p className="text-xs text-stone-500 mt-0.5">
               {filtered.length} product{filtered.length !== 1 ? 's' : ''} available · Exchange Rate: 1 USD = {exchangeRate} LRD
@@ -472,6 +555,40 @@ export default function CustomerCatalog({ onGoToLogin }) {
             </div>
           )}
         </div>
+
+        {/* Dynamic subcategory pills directly above grid when viewing Other Products */}
+        {activeCategory === 'Other Products' && otherSubCategories.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-4 mb-4">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 mr-1 flex-shrink-0">
+              Filter By Type:
+            </span>
+            <button
+              type="button"
+              onClick={() => setActiveSubCategory('All')}
+              className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                activeSubCategory === 'All'
+                  ? 'bg-[#45150b] text-white shadow-sm'
+                  : 'bg-white text-stone-600 border border-stone-300 hover:border-stone-400'
+              }`}
+            >
+              All ({products.filter(p => getProductPrimaryCategory(p) === 'Other Products').length})
+            </button>
+            {otherSubCategories.map(sub => (
+              <button
+                key={sub.name}
+                type="button"
+                onClick={() => setActiveSubCategory(sub.name)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                  activeSubCategory.toLowerCase() === sub.name.toLowerCase()
+                    ? 'bg-[#45150b] text-white shadow-sm'
+                    : 'bg-white text-stone-600 border border-stone-300 hover:border-stone-400'
+                }`}
+              >
+                {sub.name} ({sub.count})
+              </button>
+            ))}
+          </div>
+        )}
 
         {loading ? (
           <div className="py-24 text-center space-y-3">
@@ -588,7 +705,7 @@ export default function CustomerCatalog({ onGoToLogin }) {
             <ShoppingBag className="w-10 h-10 text-stone-300 mx-auto" />
             <h5 className="font-serif text-lg text-stone-800">No items found</h5>
             <p className="text-xs text-stone-500">
-              We couldn't find any products in "{activeCategory}". Try clearing your search.
+              We couldn't find any products in "{activeSubCategory !== 'All' ? activeSubCategory : activeCategory}". Try clearing your search.
             </p>
           </div>
         )}
