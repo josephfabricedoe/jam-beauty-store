@@ -351,17 +351,18 @@ export default function CustomerCatalog({ onGoToLogin }) {
         </div>
 
         {/* 2. CATEGORY NAVIGATION SUBHEADER */}
-        <div className="border-t border-[#f2ece4] bg-white">
-          <div className="max-w-7xl mx-auto px-4 overflow-x-auto scrollbar-none py-2.5 flex items-center justify-center gap-6 sm:gap-8">
+        <div className="border-t border-[#f2ece4] bg-white shadow-xs">
+          <div className="max-w-7xl mx-auto px-4 sm:px-8 overflow-x-auto no-scrollbar scrollbar-none py-2.5 sm:py-3 flex items-center justify-start md:justify-center gap-5 sm:gap-8">
             {CATEGORIES.map(cat => (
               <button
                 key={cat.id}
+                type="button"
                 onClick={() => {
                   setActiveCategory(cat.id);
                   setActiveSubCategory('All');
                   scrollToCatalog();
                 }}
-                className={`text-[11px] font-medium tracking-[0.18em] transition-all whitespace-nowrap pb-0.5 border-b-2 ${
+                className={`text-[12px] sm:text-[11px] font-semibold tracking-[0.14em] sm:tracking-[0.18em] transition-all whitespace-nowrap pb-1 border-b-2 flex-shrink-0 ${
                   activeCategory === cat.id
                     ? 'border-[#45150b] text-[#45150b] font-bold'
                     : 'border-transparent text-stone-500 hover:text-stone-900'
@@ -374,18 +375,21 @@ export default function CustomerCatalog({ onGoToLogin }) {
 
           {/* Sub-categories bar for Other Products (Dynamically populated from uploaded spreadsheet categories) */}
           {activeCategory === 'Other Products' && otherSubCategories.length > 0 && (
-            <div className="bg-[#fcfaf7] border-t border-[#ede6dc] py-2 px-4">
-              <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 overflow-x-auto scrollbar-none">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-stone-400 mr-1 flex-shrink-0">
-                  Type:
+            <div className="bg-[#fcfaf7] border-t border-[#ede6dc] py-2.5 px-4 sm:px-8 shadow-inner">
+              <div className="max-w-7xl mx-auto flex items-center justify-start gap-2 overflow-x-auto no-scrollbar scrollbar-none">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-stone-500 mr-1 flex-shrink-0 flex items-center gap-1">
+                  <span>Type:</span>
                 </span>
                 <button
                   type="button"
-                  onClick={() => setActiveSubCategory('All')}
-                  className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                  onClick={() => {
+                    setActiveSubCategory('All');
+                    scrollToCatalog();
+                  }}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
                     activeSubCategory === 'All'
-                      ? 'bg-[#45150b] text-white shadow-sm'
-                      : 'bg-white text-stone-600 border border-stone-200 hover:border-stone-400'
+                      ? 'bg-[#45150b] text-white shadow-sm ring-2 ring-[#45150b]/20'
+                      : 'bg-white text-stone-700 border border-stone-300 hover:border-[#df9487] hover:text-[#45150b]'
                   }`}
                 >
                   All ({products.filter(p => getProductPrimaryCategory(p) === 'Other Products').length})
@@ -394,11 +398,14 @@ export default function CustomerCatalog({ onGoToLogin }) {
                   <button
                     key={sub.name}
                     type="button"
-                    onClick={() => setActiveSubCategory(sub.name)}
-                    className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                    onClick={() => {
+                      setActiveSubCategory(sub.name);
+                      scrollToCatalog();
+                    }}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
                       activeSubCategory.toLowerCase() === sub.name.toLowerCase()
-                        ? 'bg-[#45150b] text-white shadow-sm'
-                        : 'bg-white text-stone-600 border border-stone-200 hover:border-stone-400'
+                        ? 'bg-[#45150b] text-white shadow-sm ring-2 ring-[#45150b]/20'
+                        : 'bg-white text-stone-700 border border-stone-300 hover:border-[#df9487] hover:text-[#45150b]'
                     }`}
                   >
                     {sub.name} ({sub.count})
@@ -559,35 +566,43 @@ export default function CustomerCatalog({ onGoToLogin }) {
 
         {/* Dynamic subcategory pills directly above grid when viewing Other Products */}
         {activeCategory === 'Other Products' && otherSubCategories.length > 0 && (
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-none pb-4 mb-4">
-            <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 mr-1 flex-shrink-0">
-              Filter By Type:
-            </span>
-            <button
-              type="button"
-              onClick={() => setActiveSubCategory('All')}
-              className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-                activeSubCategory === 'All'
-                  ? 'bg-[#45150b] text-white shadow-sm'
-                  : 'bg-white text-stone-600 border border-stone-300 hover:border-stone-400'
-              }`}
-            >
-              All ({products.filter(p => getProductPrimaryCategory(p) === 'Other Products').length})
-            </button>
-            {otherSubCategories.map(sub => (
+          <div className="bg-white border border-[#ede6dc] rounded-2xl p-4 shadow-sm mb-6">
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <span className="text-xs font-bold uppercase tracking-wider text-[#45150b] flex items-center gap-1.5">
+                <Sparkles className="w-4 h-4 text-[#df9487]" />
+                <span>Filter Other Products By Category:</span>
+              </span>
+              <span className="text-xs text-stone-500 font-medium">
+                {activeSubCategory === 'All' ? 'Showing All Types' : `Active: ${activeSubCategory}`}
+              </span>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scrollbar-none pb-1">
               <button
-                key={sub.name}
                 type="button"
-                onClick={() => setActiveSubCategory(sub.name)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
-                  activeSubCategory.toLowerCase() === sub.name.toLowerCase()
-                    ? 'bg-[#45150b] text-white shadow-sm'
-                    : 'bg-white text-stone-600 border border-stone-300 hover:border-stone-400'
+                onClick={() => setActiveSubCategory('All')}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
+                  activeSubCategory === 'All'
+                    ? 'bg-[#45150b] text-white shadow-sm ring-2 ring-[#45150b]/20'
+                    : 'bg-stone-50 text-stone-700 border border-stone-300 hover:border-[#df9487] hover:text-[#45150b]'
                 }`}
               >
-                {sub.name} ({sub.count})
+                All ({products.filter(p => getProductPrimaryCategory(p) === 'Other Products').length})
               </button>
-            ))}
+              {otherSubCategories.map(sub => (
+                <button
+                  key={sub.name}
+                  type="button"
+                  onClick={() => setActiveSubCategory(sub.name)}
+                  className={`px-3.5 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap flex-shrink-0 transition-all ${
+                    activeSubCategory.toLowerCase() === sub.name.toLowerCase()
+                      ? 'bg-[#45150b] text-white shadow-sm ring-2 ring-[#45150b]/20'
+                      : 'bg-stone-50 text-stone-700 border border-stone-300 hover:border-[#df9487] hover:text-[#45150b]'
+                  }`}
+                >
+                  {sub.name} ({sub.count})
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
