@@ -19,33 +19,40 @@
 
 /* Animated scan line */
 @keyframes scanLine {
-  0%   { top: 4px; opacity: 1; }
+  0%   { top: 6px; opacity: 0.9; }
   48%  { opacity: 1; }
-  50%  { top: calc(100% - 4px); opacity: 0.6; }
+  50%  { top: calc(100% - 8px); opacity: 0.85; }
   52%  { opacity: 1; }
-  100% { top: 4px; opacity: 1; }
+  100% { top: 6px; opacity: 0.9; }
 }
 .scanner-line {
   position: absolute;
-  left: 0; right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #efaa9b, #fde2dc, #efaa9b, transparent);
-  box-shadow: 0 0 10px #efaa9b, 0 0 20px #efaa9b99;
-  animation: scanLine 1.8s ease-in-out infinite;
-  border-radius: 2px;
+  left: 2px; right: 2px;
+  height: 2.5px;
+  background: linear-gradient(90deg, transparent, #efaa9b 15%, #ffffff 50%, #efaa9b 85%, transparent);
+  box-shadow: 0 0 12px #efaa9b, 0 0 24px rgba(239, 170, 155, 0.7);
+  animation: scanLine 2s ease-in-out infinite;
+  border-radius: 9999px;
+  pointer-events: none;
 }
 
-/* html5-qrcode: hide library chrome, keep only the video */
-.jam-qr-wrapper { position: absolute; inset: 0; overflow: hidden; }
-.jam-qr-wrapper * { display: none !important; }
-.jam-qr-wrapper video {
-  display: block !important;
-  position: absolute !important;
-  inset: 0 !important;
+/* html5-qrcode: ensure container and video are seamless */
+#jam-modal-barcode-reader {
+  width: 100% !important;
+  height: 100% !important;
+  position: relative !important;
+  overflow: hidden !important;
+}
+#jam-modal-barcode-reader video {
   width: 100% !important;
   height: 100% !important;
   object-fit: cover !important;
-  border-radius: 0 !important;
+}
+#jam-modal-barcode-reader #qr-shaded-region {
+  display: none !important;
+}
+#jam-modal-barcode-reader canvas {
+  display: none !important;
 }
 
 /* Receipt print styles */

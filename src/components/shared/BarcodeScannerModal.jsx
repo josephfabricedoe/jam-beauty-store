@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import Modal from './Modal';
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode';
-import { Zap, ZapOff, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Zap, ZapOff, CheckCircle2, AlertCircle, X } from 'lucide-react';
 
 function playBeep() {
   try {
@@ -9,27 +8,47 @@ function playBeep() {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(1800, ctx.currentTime);
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    osc.frequency.setValueAtTime(1850, ctx.currentTime);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.12);
     osc.connect(gain);
     gain.connect(ctx.destination);
     osc.start();
     osc.stop(ctx.currentTime + 0.12);
-  } catch (e) {}
+  } catch (e) {
+    // AudioContext blocked or not supported
+  }
 }
 
-export default function BarcodeScannerModal({ isOpen, onClose, onScan, title = 'Scan Product Barcode' }) {
+export default function BarcodeScannerModal({
+  isOpen,
+  onClose,
+  onScan,
+  title = 'Scan 1 Item (Camera will close automatically)',
+}) {
   const [torchOn, setTorchOn] = useState(false);
-  const [hasTorch, setHasTorch] = useState(false);
+  const [hasTorch, setHasTorch] = useState(true);
+  const [zoomCapability, setZoomCapability] = useState(null);
+  const [currentZoom, setCurrentZoom] = useState(1);
+  const [focusIndicator, setFocusIndicator] = useState({ x: 0, y: 0, active: false });
   const [scannedCode, setScannedCode] = useState('');
   const [manualInput, setManualInput] = useState('');
   const [error, setError] = useState('');
 
   const html5QrCodeRef = useRef(null);
+  const activeTrackRef = useRef(null);
   const containerId = 'jam-modal-barcode-reader';
 
   const stopScanner = async () => {
+    // 1. Turn off torch if running
+    if (activeTrackRef.current) {
+      try {
+        await activeTrackRef.current.applyConstraints({ advanced: [{ torch: false }] });
+      } catch (e) {}
+      activeTrackRef.current = null;
+    }
+
+    // 2. Stop HTML5 barcode scanner
     try {
       if (html5QrCodeRef.current) {
         if (html5QrCodeRef.current.isScanning) {
@@ -49,10 +68,13 @@ export default function BarcodeScannerModal({ isOpen, onClose, onScan, title = '
       setScannedCode('');
       setManualInput('');
       setTorchOn(false);
-      setHasTorch(false);
       setError('');
+      setFocusIndicator({ x: 0, y: 0, active: false });
       return;
     }
+
+    // Prevent body scroll when open
+    document.body.style.overflow = 'hidden';
 
     const timer = setTimeout(async () => {
       try {
@@ -64,6 +86,8 @@ export default function BarcodeScannerModal({ isOpen, onClose, onScan, title = '
           Html5QrcodeSupportedFormats.UPC_A,
           Html5QrcodeSupportedFormats.UPC_E,
           Html5QrcodeSupportedFormats.QR_CODE,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.CODE_93,
         ];
 
         const scanner = new Html5Qrcode(containerId, {
@@ -75,64 +99,161 @@ export default function BarcodeScannerModal({ isOpen, onClose, onScan, title = '
         const onScanSuccess = async (decodedText) => {
           if (!decodedText) return;
           const clean = decodedText.trim();
-          // Stop immediately to prevent continuous duplicate multi-scans
+          if (!clean) return;
+
+          // Single-scan lock: set code, sound beep, vibrate
           setScannedCode(clean);
           playBeep();
-          if (navigator.vibrate) navigator.vibrate(100);
+          if (navigator.vibrate) {
+            navigator.vibrate([70, 40, 70]);
+          }
 
+          // Stop scanner right away to prevent multiple firing
           await stopScanner();
 
-          // Briefly show success checkmark then return value
+          // Display visual confirmation briefly, then complete and close
           setTimeout(() => {
             onScan(clean);
             onClose();
-          }, 350);
+          }, 380);
         };
 
+        // Start scanner with HD video and continuous focus constraints
         await scanner.start(
-          { facingMode: 'environment' },
           {
-            fps: 15,
-            qrbox: { width: 280, height: 160 },
-            aspectRatio: 1.777778,
-            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+            facingMode: { ideal: 'environment' },
+          },
+          {
+            fps: 25,
+            qrbox: (viewfinderWidth, viewfinderHeight) => {
+              const w = Math.floor(Math.min(viewfinderWidth * 0.88, 360));
+              const h = Math.floor(Math.min(viewfinderHeight * 0.58, 200));
+              return { width: Math.max(w, 200), height: Math.max(h, 120) };
+            },
+            aspectRatio: 1.333333,
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true,
+            },
           },
           onScanSuccess,
           () => {}
         );
 
-        // Check torch capability
+        // Hardware camera track optimization (autofocus, auto-exposure, torch, zoom)
         try {
           const videoElem = document.querySelector(`#${containerId} video`);
           if (videoElem && videoElem.srcObject) {
             const track = videoElem.srcObject.getVideoTracks()[0];
-            const caps = track.getCapabilities ? track.getCapabilities() : {};
-            if (caps.torch) setHasTorch(true);
+            if (track) {
+              activeTrackRef.current = track;
+              const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+
+              if ('torch' in capabilities) {
+                setHasTorch(true);
+              }
+
+              if (capabilities.zoom) {
+                setZoomCapability({
+                  min: capabilities.zoom.min || 1,
+                  max: capabilities.zoom.max || 3,
+                  step: capabilities.zoom.step || 0.1,
+                });
+              }
+
+              // Apply continuous autofocus, auto exposure, white balance
+              const advanced = [];
+              if (capabilities.focusMode?.includes('continuous')) {
+                advanced.push({ focusMode: 'continuous' });
+              }
+              if (capabilities.exposureMode?.includes('continuous')) {
+                advanced.push({ exposureMode: 'continuous' });
+              }
+              if (capabilities.whiteBalanceMode?.includes('continuous')) {
+                advanced.push({ whiteBalanceMode: 'continuous' });
+              }
+
+              // Slightly adjust zoom to ~1.2x if supported to optimize focal depth on curved beauty bottles
+              if (capabilities.zoom && capabilities.zoom.min <= 1.25 && capabilities.zoom.max >= 1.25) {
+                advanced.push({ zoom: 1.25 });
+                setCurrentZoom(1.25);
+              }
+
+              if (advanced.length > 0) {
+                await track.applyConstraints({ advanced });
+              }
+            }
           }
-        } catch (e) {}
+        } catch (camError) {
+          console.warn('Advanced camera constraints not applied:', camError);
+        }
       } catch (err) {
         console.error('Barcode camera error:', err);
-        setError('Camera unavailable. You can type the barcode manually below.');
+        setError('Camera unavailable. You can enter the barcode numbers manually below.');
       }
     }, 150);
 
     return () => {
+      document.body.style.overflow = '';
       clearTimeout(timer);
       stopScanner();
     };
   }, [isOpen]);
 
   const toggleTorch = async () => {
+    if (!activeTrackRef.current) {
+      alert('Torch is not ready yet. Please wait for camera to finish loading.');
+      return;
+    }
     try {
-      const videoElem = document.querySelector(`#${containerId} video`);
-      if (videoElem && videoElem.srcObject) {
-        const track = videoElem.srcObject.getVideoTracks()[0];
-        const next = !torchOn;
-        await track.applyConstraints({ advanced: [{ torch: next }] });
-        setTorchOn(next);
-      }
+      const next = !torchOn;
+      await activeTrackRef.current.applyConstraints({
+        advanced: [{ torch: next }],
+      });
+      setTorchOn(next);
     } catch (e) {
-      alert('Torch is not supported on this device camera.');
+      console.warn('Torch toggle failed:', e);
+      alert('Flashlight is not supported on this camera device.');
+    }
+  };
+
+  const cycleZoom = async () => {
+    if (!activeTrackRef.current || !zoomCapability) return;
+    try {
+      const nextZoom = currentZoom >= 2 ? 1 : currentZoom === 1 ? 1.5 : 2;
+      await activeTrackRef.current.applyConstraints({
+        advanced: [{ zoom: nextZoom }],
+      });
+      setCurrentZoom(nextZoom);
+    } catch (e) {
+      console.warn('Zoom failed:', e);
+    }
+  };
+
+  const handleTapToFocus = async (e) => {
+    if (!activeTrackRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    // Visual ring pulse at tap point
+    setFocusIndicator({ x, y, active: true });
+    setTimeout(() => setFocusIndicator(prev => ({ ...prev, active: false })), 800);
+
+    // Re-trigger continuous autofocus & exposure
+    try {
+      const caps = activeTrackRef.current.getCapabilities ? activeTrackRef.current.getCapabilities() : {};
+      const advanced = [];
+      if (caps.focusMode?.includes('continuous')) {
+        advanced.push({ focusMode: 'continuous' });
+      }
+      if (caps.exposureMode?.includes('continuous')) {
+        advanced.push({ exposureMode: 'continuous' });
+      }
+      if (advanced.length > 0) {
+        await activeTrackRef.current.applyConstraints({ advanced });
+      }
+    } catch (err) {
+      console.warn('Refocus constraint failed:', err);
     }
   };
 
@@ -147,81 +268,158 @@ export default function BarcodeScannerModal({ isOpen, onClose, onScan, title = '
   if (!isOpen) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={title} size="md">
-      <div className="space-y-3">
-        {/* Scanner Viewport */}
-        <div className="relative rounded-2xl overflow-hidden bg-black border-2 border-[#efaa9b]/60 shadow-2xl">
-          <div id={containerId} className="w-full h-64 bg-black relative" />
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/75 backdrop-blur-sm transition-opacity"
+        onClick={onClose}
+      />
 
-          {/* Animated Laser Overlay */}
-          {!scannedCode && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-              <div className="relative w-72 h-36 border-2 border-[#efaa9b] rounded-xl overflow-hidden shadow-[0_0_20px_rgba(239,170,155,0.4)]">
-                <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-white" />
-                <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-white" />
-                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-white" />
-                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-white" />
-                <div className="scanner-line" />
-              </div>
-            </div>
-          )}
-
-          {/* Top Controls */}
-          <div className="absolute top-2 inset-x-2 flex items-center justify-between pointer-events-auto px-2">
-            <span className="text-[11px] font-semibold text-white bg-black/70 px-3 py-1 rounded-full border border-slate-700">
-              {scannedCode ? `Scanned: ${scannedCode}` : 'Point at 1 product barcode'}
-            </span>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={toggleTorch}
-                title={torchOn ? 'Turn flashlight off' : 'Turn flashlight on'}
-                className={`p-2 rounded-full transition-colors ${
-                  torchOn
-                    ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/50'
-                    : 'bg-black/60 text-slate-300 hover:text-white border border-slate-700'
-                }`}
-              >
-                {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          {/* Successful single scan confirmation overlay */}
-          {scannedCode && (
-            <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center text-center p-4">
-              <CheckCircle2 className="w-12 h-12 text-emerald-400 mb-2 animate-bounce" />
-              <p className="text-white font-bold text-sm">Barcode Scanned (1 Item Added)</p>
-              <p className="font-mono text-[#efaa9b] text-base font-bold mt-1">{scannedCode}</p>
-            </div>
-          )}
+      {/* Modal Dialog Content */}
+      <div className="relative w-full max-w-md bg-[#182234] border border-slate-700/80 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col animate-scale-up">
+        {/* Header matching reference screenshot */}
+        <div className="flex items-start justify-between px-5 pt-5 pb-4 border-b border-slate-700/60">
+          <h3 className="text-base sm:text-lg font-bold text-white leading-snug pr-3">
+            Scan 1 Item (Camera will
+            <br />
+            close automatically)
+          </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 -mr-1 -mt-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-700/60 transition-colors"
+            aria-label="Close scanner"
+          >
+            <X className="w-6 h-6" />
+          </button>
         </div>
 
-        {error && (
-          <p className="text-xs text-amber-400 flex items-center gap-1.5 bg-amber-950/40 border border-amber-800/40 p-2.5 rounded-xl">
-            <AlertCircle className="w-4 h-4 flex-shrink-0" />
-            <span>{error}</span>
-          </p>
-        )}
-
-        {/* Manual Barcode Input */}
-        <form onSubmit={handleManualSubmit} className="flex gap-2 pt-1">
-          <input
-            type="text"
-            value={manualInput}
-            onChange={e => setManualInput(e.target.value)}
-            placeholder="Or enter barcode numbers manually..."
-            className="flex-1 bg-slate-700 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-[#efaa9b]"
-          />
-          <button
-            type="submit"
-            className="px-4 py-2 bg-[#efaa9b] hover:bg-[#e89887] text-[#45150b] rounded-xl text-sm font-bold transition-colors"
+        {/* Body */}
+        <div className="p-4 sm:p-5 space-y-4">
+          {/* Camera Viewport */}
+          <div
+            onClick={handleTapToFocus}
+            className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-black border border-[#efaa9b]/70 shadow-2xl cursor-crosshair select-none"
           >
-            Apply
-          </button>
-        </form>
+            {/* HTML5 QR Code Video Destination */}
+            <div id={containerId} className="w-full h-full object-cover" />
+
+            {/* Top-left Floating Pill: 'Point at 1 product barcode' */}
+            <div className="absolute top-3 left-3 z-20 pointer-events-none">
+              <span className="inline-flex items-center px-3.5 py-1.5 rounded-full bg-black/75 backdrop-blur-md text-white text-xs font-semibold border border-white/10 shadow-md">
+                Point at 1 product barcode
+              </span>
+            </div>
+
+            {/* Top-right Floating Camera Controls (Torch + Zoom) */}
+            <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+              {zoomCapability && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleZoom();
+                  }}
+                  className="w-10 h-10 rounded-full bg-black/65 backdrop-blur-md text-white font-bold text-xs border border-white/20 flex items-center justify-center active:scale-90 transition-transform shadow-md"
+                  title="Toggle Zoom"
+                >
+                  {currentZoom}x
+                </button>
+              )}
+
+              {hasTorch && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    toggleTorch();
+                  }}
+                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 border shadow-md ${
+                    torchOn
+                      ? 'bg-amber-400 border-amber-300 text-slate-950 shadow-amber-400/50'
+                      : 'bg-black/65 backdrop-blur-md text-white border-white/20 hover:border-white/40'
+                  }`}
+                  title={torchOn ? 'Turn off flash' : 'Turn on flash'}
+                >
+                  {torchOn ? (
+                    <Zap className="w-5 h-5 fill-current" />
+                  ) : (
+                    <ZapOff className="w-5 h-5" />
+                  )}
+                </button>
+              )}
+            </div>
+
+            {/* Viewfinder Bounding Box with Corner Brackets & Crosshairs */}
+            {!scannedCode && (
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                <div className="relative w-[86%] h-[58%] rounded-2xl border-2 border-[#efaa9b] shadow-[0_0_20px_rgba(239,170,155,0.35)]">
+                  {/* 4 White Corner Brackets */}
+                  <div className="absolute -top-[3px] -left-[3px] w-6 h-6 border-t-[3.5px] border-l-[3.5px] border-white rounded-tl-xl" />
+                  <div className="absolute -top-[3px] -right-[3px] w-6 h-6 border-t-[3.5px] border-r-[3.5px] border-white rounded-tr-xl" />
+                  <div className="absolute -bottom-[3px] -left-[3px] w-6 h-6 border-b-[3.5px] border-l-[3.5px] border-white rounded-bl-xl" />
+                  <div className="absolute -bottom-[3px] -right-[3px] w-6 h-6 border-b-[3.5px] border-r-[3.5px] border-white rounded-br-xl" />
+
+                  {/* Left & Right Middle Crosshair Markers matching reference screenshot */}
+                  <div className="absolute top-1/2 -left-[2px] -translate-y-1/2 w-7 h-[3.5px] bg-white rounded-r-full shadow-sm" />
+                  <div className="absolute top-1/2 -right-[2px] -translate-y-1/2 w-7 h-[3.5px] bg-white rounded-l-full shadow-sm" />
+
+                  {/* Animated Rose Gold Laser Beam */}
+                  <div className="scanner-line" />
+                </div>
+              </div>
+            )}
+
+            {/* Tap-to-focus Animated Ring */}
+            {focusIndicator.active && (
+              <div
+                className="absolute pointer-events-none -translate-x-1/2 -translate-y-1/2 w-14 h-14 rounded-full border-2 border-amber-300 animate-ping opacity-80 z-30"
+                style={{ left: focusIndicator.x, top: focusIndicator.y }}
+              />
+            )}
+
+            {/* Decode Success Confirmation Overlay */}
+            {scannedCode && (
+              <div className="absolute inset-0 z-30 bg-black/85 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+                <div className="w-16 h-16 rounded-full bg-emerald-500/20 border-2 border-emerald-400 flex items-center justify-center mb-3">
+                  <CheckCircle2 className="w-10 h-10 text-emerald-400 animate-bounce" />
+                </div>
+                <p className="text-white font-bold text-base">Barcode Scanned!</p>
+                <p className="font-mono text-[#efaa9b] text-lg font-bold mt-1 bg-slate-900/90 px-4 py-1.5 rounded-lg border border-[#efaa9b]/40">
+                  {scannedCode}
+                </p>
+                <p className="text-slate-400 text-xs mt-2">Closing camera...</p>
+              </div>
+            )}
+          </div>
+
+          {/* Camera Error Message */}
+          {error && (
+            <div className="text-xs text-amber-300 flex items-center gap-2 bg-amber-950/40 border border-amber-800/40 p-3 rounded-xl">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 text-amber-400" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* Manual Input Form */}
+          <form onSubmit={handleManualSubmit} className="flex items-center gap-2.5 pt-0.5">
+            <input
+              type="text"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder="Or enter barcode numbers manually"
+              className="flex-1 bg-slate-700/60 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-400 text-sm focus:outline-none focus:border-[#efaa9b] focus:ring-1 focus:ring-[#efaa9b] transition-colors"
+            />
+            <button
+              type="submit"
+              disabled={!manualInput.trim()}
+              className="px-6 py-3 bg-[#efaa9b] hover:bg-[#e89887] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed text-[#45150b] rounded-xl text-sm font-bold transition-all shadow-md flex-shrink-0"
+            >
+              Apply
+            </button>
+          </form>
+        </div>
       </div>
-    </Modal>
+    </div>
   );
 }
