@@ -5,7 +5,7 @@ import { getFirestore } from 'firebase/firestore';
 // Firebase configuration for project: jam-beauty-store-online
 // Get your apiKey from: Firebase Console -> Project Settings -> Your Apps
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyABnn-dG_UIJ-3UpbfvL5KMP0gBey6rkI8',
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'jam-beauty-store-online.firebaseapp.com',
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'jam-beauty-store-online',
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'jam-beauty-store-online.firebasestorage.app',
