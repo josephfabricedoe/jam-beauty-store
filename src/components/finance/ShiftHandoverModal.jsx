@@ -5,7 +5,8 @@ import { useAuth } from '../../hooks/useAuth';
 import { useApp } from '../../contexts/AppContext';
 import { useCurrency } from '../../hooks/useCurrency';
 import Modal from '../shared/Modal';
-import { Printer, CheckCircle, AlertTriangle, DollarSign, Calculator, FileText, ArrowRight } from 'lucide-react';
+import { Printer, CheckCircle, AlertTriangle, DollarSign, Calculator, FileText, ArrowRight, Bluetooth } from 'lucide-react';
+import { printToBluetoothThermalPrinter, buildZReportEscPos } from '../../utils/bluetoothPrinter';
 
 export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expenses = [] }) {
   const { currentUser } = useAuth();
@@ -60,6 +61,8 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
   const isOver = varianceUSD > 0.05;
   const isShort = varianceUSD < -0.05;
 
+  const [btPrinting, setBtPrinting] = useState(false);
+
   const handlePrint = () => {
     const root = document.getElementById('receipt-print-root');
     if (root && printRef.current) {
@@ -70,6 +73,36 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
         root.innerHTML = '';
         root.style.display = 'none';
       }, 1000);
+    }
+  };
+
+  const handleBluetoothPrint = async () => {
+    setBtPrinting(true);
+    try {
+      const escBytes = buildZReportEscPos(
+        {
+          cashierName: currentUser?.displayName || currentUser?.email || 'Staff',
+          date: todayStr,
+          totalSales: todayGrossUSD,
+          salesCount: todaySales.length,
+          cashSales: totalCashUSD,
+          momoSales: totalMoMoUSD,
+          cardSales: totalCardUSD,
+          openingFloat: floatUSD,
+          countedCash: totalCountedUSD,
+          expectedCash: expectedCashUSD,
+          variance: varianceUSD,
+          status: isBalanced ? 'BALANCED' : isOver ? 'OVER' : 'SHORT',
+        },
+        storeSettings
+      );
+      await printToBluetoothThermalPrinter(escBytes);
+      alert('Z-Report successfully sent to 58mm Bluetooth printer!');
+    } catch (err) {
+      console.error('Bluetooth Z-report print error:', err);
+      alert(err.message || 'Could not connect to Bluetooth printer.');
+    } finally {
+      setBtPrinting(false);
     }
   };
 
@@ -131,11 +164,20 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 px-4 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-200 rounded-xl text-xs font-bold transition-colors"
+              onClick={handleBluetoothPrint}
+              disabled={btPrinting}
+              className="flex items-center gap-1.5 px-4 py-2 bg-[#efaa9b] hover:bg-[#e89887] text-[#45150b] rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
             >
-              <Printer className="w-4 h-4 text-[#efaa9b]" />
-              <span>Print Z-Report Slip</span>
+              <Bluetooth className="w-4 h-4" />
+              <span>{btPrinting ? 'Printing 58mm...' : 'Print 58mm (Bluetooth)'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-300 rounded-xl text-xs font-semibold transition-colors"
+            >
+              <Printer className="w-3.5 h-3.5 text-slate-400" />
+              <span>PDF</span>
             </button>
             <button
               type="button"

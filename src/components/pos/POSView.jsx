@@ -8,7 +8,8 @@ import BarcodeScanner from './BarcodeScanner';
 import Cart from './Cart';
 import ReceiptModal from './ReceiptModal';
 import { getPriceForMode } from './PricingModeSwitcher';
-import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard } from 'lucide-react';
+import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth } from 'lucide-react';
+import { connectBluetoothPrinter, getConnectedPrinterName } from '../../utils/bluetoothPrinter';
 
 export default function POSView() {
   const { currentUser } = useAuth();
@@ -31,6 +32,7 @@ export default function POSView() {
   const [receiptOpen, setReceiptOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [lastAddedProduct, setLastAddedProduct] = useState(null);
+  const [btPrinter, setBtPrinter] = useState(getConnectedPrinterName());
 
   // Subscribe to live products from Firestore for instant local search
   useEffect(() => {
@@ -374,9 +376,29 @@ export default function POSView() {
 
       {/* Right: Cart panel */}
       <div className="md:w-1/2 p-4 flex flex-col">
-        <h2 className="text-sm font-semibold text-slate-400 mb-3 uppercase tracking-wide flex items-center gap-2">
-          <ShoppingBag className="w-4 h-4 text-rose-400" /> Current Cart
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide flex items-center gap-2">
+            <ShoppingBag className="w-4 h-4 text-rose-400" /> Current Cart
+          </h2>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const conn = await connectBluetoothPrinter();
+                setBtPrinter(conn.name);
+              } catch (e) {
+                alert(e.message);
+              }
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-xs transition-colors"
+            title="Connect 58mm Portable Thermal Printer"
+          >
+            <Bluetooth className={`w-3.5 h-3.5 ${btPrinter ? 'text-emerald-400' : 'text-[#efaa9b]'}`} />
+            <span className="text-[11px] text-slate-300">
+              {btPrinter ? btPrinter : 'Connect 58mm Printer'}
+            </span>
+          </button>
+        </div>
         <Cart
           items={cartItems}
           onUpdate={updateItem}
