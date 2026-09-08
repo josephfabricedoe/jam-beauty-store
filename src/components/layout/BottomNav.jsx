@@ -5,7 +5,7 @@ import { ShoppingCart, Package, BarChart3, Users, Truck, HeartHandshake } from '
 
 const ALL_NAV_ITEMS = [
   { id: 'pos',        label: 'POS',       icon: ShoppingCart,    adminOnly: false },
-  { id: 'customers',  label: 'Salons',    icon: HeartHandshake,  adminOnly: false },
+  { id: 'customers',  label: 'VIP Accts', icon: HeartHandshake,  adminOnly: false },
   { id: 'attendance', label: 'Staff',     icon: Users,           adminOnly: false },
   { id: 'delivery',   label: 'Delivery',  icon: Truck,           adminOnly: false },
   { id: 'inventory',  label: 'Stock',     icon: Package,         adminOnly: true },

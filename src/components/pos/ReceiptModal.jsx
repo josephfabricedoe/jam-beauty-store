@@ -106,12 +106,16 @@ export default function ReceiptModal({ isOpen, onClose, sale }) {
       `🌸 *${storeName}* 🌸\n` +
       `🧾 *Receipt #${receiptNo}*\n` +
       `📅 Date: ${dateStr}\n` +
-      `👤 Client: ${sale.customerName || 'Valued Customer'}\n\n` +
+      `👤 Client: ${sale.customerName || 'Valued Customer'}${sale.customerPhone ? ` (${sale.customerPhone})` : ''}\n\n` +
       `*Purchased Items:*\n${itemsList}\n\n` +
+      (sale.discount > 0 ? `🏷️ *Order Discount:* -$${Number(sale.discount).toFixed(2)}\n` : '') +
       `💵 *TOTAL USD:* $${Number(sale.total).toFixed(2)}\n` +
       `🇱🇷 *TOTAL LRD:* L$${lrd(sale.total)}\n` +
-      `💳 Payment: ${sale.paymentMethod || 'Cash'}\n\n` +
-      `Thank you for choosing JAM Beauty Store! ✨`;
+      `💳 Payment: ${sale.paymentMethod || 'Cash'}\n` +
+      (sale.amountPaid > 0 ? `💵 Paid Today: $${Number(sale.amountPaid).toFixed(2)}\n` : '') +
+      (sale.balanceOwed > 0 ? `⚠️ *BALANCE DUE (Credit):* $${Number(sale.balanceOwed).toFixed(2)}\n` : '') +
+      (sale.change > 0 ? `🪙 Change: $${Number(sale.change).toFixed(2)}\n` : '') +
+      `\nThank you for choosing JAM Beauty Store! ✨`;
 
     const cleanPhone = (sale.customerPhone || '').replace(/\D/g, '');
     const url = cleanPhone
@@ -310,7 +314,7 @@ export default function ReceiptModal({ isOpen, onClose, sale }) {
         <div className="border-t border-dashed border-gray-400 pt-2 space-y-0.5">
           {sale.discount > 0 && (
             <div className="flex justify-between">
-              <span>Discount:</span>
+              <span>Order Discount:</span>
               <span>-${Number(sale.discount).toFixed(2)}</span>
             </div>
           )}
@@ -329,8 +333,14 @@ export default function ReceiptModal({ isOpen, onClose, sale }) {
             </div>
             {sale.amountPaid > 0 && (
               <div className="flex justify-between">
-                <span>Paid:</span>
+                <span>Paid Today:</span>
                 <span>${Number(sale.amountPaid).toFixed(2)}</span>
+              </div>
+            )}
+            {sale.balanceOwed > 0 && (
+              <div className="flex justify-between font-bold text-red-600">
+                <span>BALANCE DUE (Credit):</span>
+                <span>${Number(sale.balanceOwed).toFixed(2)}</span>
               </div>
             )}
             {sale.change > 0 && (

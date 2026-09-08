@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import StoreInfoForm from './StoreInfoForm';
 import WebsiteCmsForm from './WebsiteCmsForm';
-import { Settings, Globe, Store, Receipt } from 'lucide-react';
+import FactoryResetModal from './FactoryResetModal';
+import { Settings, Globe, Store, Receipt, ShieldAlert, Trash2, Database } from 'lucide-react';
 
 export default function SettingsView() {
   const { storeSettings } = useApp();
-  const [activeTab, setActiveTab] = useState('website'); // 'website' | 'store'
+  const [activeTab, setActiveTab] = useState('website'); // 'website' | 'store' | 'system'
+  const [resetModalOpen, setResetModalOpen] = useState(false);
 
   return (
     <div className="p-4 max-w-4xl mx-auto space-y-5">
@@ -16,13 +18,13 @@ export default function SettingsView() {
             <Settings className="w-5 h-5 text-[#efaa9b]" />
           </div>
           <div>
-            <h2 className="text-lg font-bold text-white">Store Settings & Website CMS</h2>
-            <p className="text-xs text-slate-400">Manage your online catalog, WhatsApp orders, receipts, and currency</p>
+            <h2 className="text-lg font-bold text-white">Store Settings & System</h2>
+            <p className="text-xs text-slate-400">Manage online catalog, POS configuration, receipts, and system reset</p>
           </div>
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700">
+        <div className="flex items-center gap-1.5 bg-slate-800 p-1 rounded-xl border border-slate-700 flex-wrap">
           <button
             type="button"
             onClick={() => setActiveTab('website')}
@@ -33,7 +35,7 @@ export default function SettingsView() {
             }`}
           >
             <Globe className="w-3.5 h-3.5" />
-            <span>Website & Catalog CMS</span>
+            <span>Website CMS</span>
           </button>
 
           <button
@@ -48,14 +50,29 @@ export default function SettingsView() {
             <Store className="w-3.5 h-3.5" />
             <span>POS & Receipts</span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('system')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              activeTab === 'system'
+                ? 'bg-red-500 text-white shadow-sm'
+                : 'text-red-400 hover:text-red-300'
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>System Reset</span>
+          </button>
         </div>
       </div>
 
-      {activeTab === 'website' ? (
+      {activeTab === 'website' && (
         <div className="bg-slate-800/60 border border-slate-700/80 rounded-2xl p-5 shadow-xl">
           <WebsiteCmsForm settings={storeSettings} />
         </div>
-      ) : (
+      )}
+
+      {activeTab === 'store' && (
         <div className="space-y-5">
           <div className="bg-slate-800/60 border border-slate-700/80 rounded-2xl p-5 shadow-xl">
             <StoreInfoForm settings={storeSettings} />
@@ -88,6 +105,58 @@ export default function SettingsView() {
           )}
         </div>
       )}
+
+      {activeTab === 'system' && (
+        <div className="space-y-5">
+          {/* Danger Zone: Factory Reset Card */}
+          <div className="bg-red-950/30 border-2 border-red-800/60 rounded-2xl p-6 shadow-xl space-y-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-red-400 font-bold text-base">
+                  <ShieldAlert className="w-5 h-5" />
+                  <h3>Danger Zone: Factory Reset App Data</h3>
+                </div>
+                <p className="text-xs text-slate-300 max-w-xl leading-relaxed">
+                  Reset your store platform to factory state by wiping transaction logs, sales history, customer debt ledgers, shift handovers, and attendance.
+                </p>
+                <p className="text-xs text-amber-300 font-semibold pt-1">
+                  🔒 Strictly protected: Requires Administrator Email and Password authentication to execute.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setResetModalOpen(true)}
+                className="flex items-center gap-2 px-5 py-3 bg-red-600 hover:bg-red-500 active:scale-95 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-red-600/30 flex-shrink-0"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Reset to Factory</span>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-red-800/40 text-xs">
+              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                <p className="font-semibold text-slate-300">Sales & Cash</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Clears receipts, orders & drawer history</p>
+              </div>
+              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                <p className="font-semibold text-slate-300">Customer Ledgers</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Clears VIP credit balances & customer debts</p>
+              </div>
+              <div className="bg-slate-900/60 p-3 rounded-xl border border-slate-800">
+                <p className="font-semibold text-slate-300">Operational Logs</p>
+                <p className="text-[11px] text-slate-500 mt-0.5">Clears shift Z-reports, attendance & dispatches</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Factory Reset Modal */}
+      <FactoryResetModal
+        isOpen={resetModalOpen}
+        onClose={() => setResetModalOpen(false)}
+      />
     </div>
   );
 }

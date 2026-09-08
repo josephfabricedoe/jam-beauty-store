@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { id: 'pos',        label: 'Point of Sale',     icon: ShoppingCart,    roles: ['admin', 'staff'] },
   { id: 'inventory',  label: 'Inventory',          icon: Package,         roles: ['admin'] }, // ADMIN ONLY
   { id: 'finance',    label: 'Finance & Reports',  icon: BarChart3,       roles: ['admin'] },
-  { id: 'customers',  label: 'Customers & Salons', icon: HeartHandshake,  roles: ['admin', 'staff'] },
+  { id: 'customers',  label: 'Customers & VIP Accounts', icon: HeartHandshake,  roles: ['admin', 'staff'] },
   { id: 'attendance', label: 'Attendance',         icon: Users,           roles: ['admin', 'staff'] },
   { id: 'delivery',   label: 'Delivery',           icon: Truck,           roles: ['admin', 'staff'] },
   { id: 'staff',      label: 'Staff Management',   icon: UserCog,         roles: ['admin'] },

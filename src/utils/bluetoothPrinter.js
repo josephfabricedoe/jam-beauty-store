@@ -248,8 +248,9 @@ export function buildSaleReceiptEscPos(sale, storeSettings = {}, exchangeRate = 
 
   // Customer line if present
   if (sale.customerName && sale.customerName !== 'Walk-in Customer') {
+    const custInfo = sale.customerPhone ? `${sale.customerName} (${sale.customerPhone})` : sale.customerName;
     b.align('left')
-      .text(`Client: ${sale.customerName}`)
+      .text(`Client: ${custInfo}`)
       .separator('-');
   }
 
@@ -275,7 +276,7 @@ export function buildSaleReceiptEscPos(sale, storeSettings = {}, exchangeRate = 
   // Totals
   b.align('left');
   if (sale.discount > 0) {
-    b.twoColumns('Discount:', `-$${Number(sale.discount).toFixed(2)}`);
+    b.twoColumns('Order Discount:', `-$${Number(sale.discount).toFixed(2)}`);
   }
 
   b.bold(true)
@@ -288,7 +289,10 @@ export function buildSaleReceiptEscPos(sale, storeSettings = {}, exchangeRate = 
   // Payment Breakdown
   b.twoColumns('Payment Method:', sale.paymentMethod || 'Cash');
   if (sale.amountPaid > 0) {
-    b.twoColumns('Amount Paid:', `$${Number(sale.amountPaid).toFixed(2)}`);
+    b.twoColumns('Paid Today:', `$${Number(sale.amountPaid).toFixed(2)}`);
+  }
+  if (sale.balanceOwed > 0) {
+    b.bold(true).twoColumns('BALANCE DUE (Credit):', `$${Number(sale.balanceOwed).toFixed(2)}`).bold(false);
   }
   if (sale.change > 0) {
     b.twoColumns('Change Returned:', `$${Number(sale.change).toFixed(2)}`);

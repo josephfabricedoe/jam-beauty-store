@@ -34,6 +34,12 @@ export default function POSView() {
   const [lastAddedProduct, setLastAddedProduct] = useState(null);
   const [btPrinter, setBtPrinter] = useState(getConnectedPrinterName());
 
+  // Order Discount & Credit Customer State
+  const [orderDiscountType, setOrderDiscountType] = useState('percent'); // 'percent' | 'fixed'
+  const [orderDiscountValue, setOrderDiscountValue] = useState('');
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerPhone, setNewCustomerPhone] = useState('');
+
   // Subscribe to live products from Firestore for instant local search
   useEffect(() => {
     const unsub = onSnapshot(collection(db, 'products'), (snap) => {
@@ -134,20 +140,57 @@ export default function POSView() {
   const removeItem = (index) => setCartItems(prev => prev.filter((_, i) => i !== index));
 
   const subtotal = cartItems.reduce((s, i) => s + i.total, 0);
-  const change = amountPaid ? Math.max(0, parseFloat(amountPaid) - subtotal) : 0;
+
+  const discountVal = parseFloat(orderDiscountValue) || 0;
+  const orderDiscountAmount = orderDiscountType === 'percent'
+    ? (subtotal * discountVal) / 100
+    : Math.min(subtotal, discountVal);
+  const finalTotal = Math.max(0, subtotal - orderDiscountAmount);
+
+  const tenderAmount = parseFloat(amountPaid) || 0;
+  const isStoreCredit = paymentMethod === 'Store Credit';
+  const isPartialPayment = !isStoreCredit && amountPaid !== '' && tenderAmount > 0 && tenderAmount < finalTotal;
+  const remainingDue = isStoreCredit ? finalTotal : (isPartialPayment ? finalTotal - tenderAmount : 0);
+  const change = (!isStoreCredit && tenderAmount >= finalTotal) ? tenderAmount - finalTotal : 0;
 
   const handleCheckout = async () => {
     if (!cartItems.length) return;
 
     const selectedCust = customersList.find(c => c.id === selectedCustomerId);
 
-    if (paymentMethod === 'Store Credit' && !selectedCust) {
-      alert('Please select a registered Customer or VIP Salon to issue Store Credit.');
-      return;
+    // If remaining balance exists (partial payment or store credit), require customer identification
+    if (remainingDue > 0) {
+      if (!selectedCust && !newCustomerName.trim()) {
+        alert(
+          `A balance of $${remainingDue.toFixed(2)} remains due on store credit.\n\nPlease select an existing Customer or enter the Customer Name & Phone below so this credit is added to their account.`
+        );
+        return;
+      }
     }
 
     setProcessing(true);
     try {
+      let custId = selectedCust?.id || null;
+      let custName = selectedCust?.name || '';
+      let custPhone = selectedCust?.phone || '';
+
+      // Auto-create new customer if name was typed in checkout
+      if (!custId && newCustomerName.trim()) {
+        const newCustDoc = await addDoc(collection(db, 'customers'), {
+          name: newCustomerName.trim(),
+          phone: newCustomerPhone.trim(),
+          customerType: 'VIP Client',
+          balanceOwed: remainingDue,
+          creditLimit: 0,
+          totalSpent: finalTotal,
+          createdAt: serverTimestamp(),
+          lastPurchaseDate: serverTimestamp(),
+        });
+        custId = newCustDoc.id;
+        custName = newCustomerName.trim();
+        custPhone = newCustomerPhone.trim();
+      }
+
       const saleData = {
         items: cartItems.map(i => ({
           productId: i.product.id || i.product.barcode,
@@ -159,18 +202,24 @@ export default function POSView() {
           discountPct: i.discountPct || 0,
           total: i.total,
         })),
-        total: subtotal,
-        discount: 0,
+        subtotal,
+        orderDiscount: orderDiscountAmount,
+        orderDiscountType,
+        orderDiscountValue: discountVal,
+        discount: orderDiscountAmount,
+        total: finalTotal,
         paymentMethod,
-        amountPaid: paymentMethod === 'Store Credit' ? 0 : (parseFloat(amountPaid) || subtotal),
-        change: paymentMethod === 'Store Credit' ? 0 : change,
+        amountPaid: isStoreCredit ? 0 : (isPartialPayment ? tenderAmount : (tenderAmount || finalTotal)),
+        balanceOwed: remainingDue,
+        change: isStoreCredit ? 0 : change,
         exchangeRate,
         cashierId: currentUser?.uid || 'staff',
         cashierName: currentUser?.displayName || currentUser?.email || 'Cashier',
-        customerId: selectedCust?.id || null,
-        customerName: selectedCust?.name || 'Walk-in Customer',
-        customerPhone: selectedCust?.phone || '',
-        isStoreCredit: paymentMethod === 'Store Credit',
+        customerId: custId,
+        customerName: custName || 'Walk-in Customer',
+        customerPhone: custPhone,
+        isStoreCredit,
+        isPartialCredit: isPartialPayment,
         timestamp: serverTimestamp(),
       };
 
@@ -190,29 +239,50 @@ export default function POSView() {
         }
       }
 
-      // Update customer balance & credit ledger if customer selected
-      if (selectedCust) {
+      // Update customer balance & credit ledger if customer selected or created
+      if (custId) {
         try {
-          if (paymentMethod === 'Store Credit') {
-            await updateDoc(doc(db, 'customers', selectedCust.id), {
-              balanceOwed: increment(subtotal),
-              totalSpent: increment(subtotal),
-              lastPurchaseDate: serverTimestamp(),
-            });
-            await addDoc(collection(db, 'customerTransactions'), {
-              customerId: selectedCust.id,
-              customerName: selectedCust.name,
-              type: 'credit_sale',
-              amount: subtotal,
-              saleId: docRef.id,
-              note: `Store credit sale: ${cartItems.length} items`,
-              timestamp: serverTimestamp(),
-            });
+          if (selectedCust) {
+            if (remainingDue > 0) {
+              await updateDoc(doc(db, 'customers', custId), {
+                balanceOwed: increment(remainingDue),
+                totalSpent: increment(finalTotal),
+                lastPurchaseDate: serverTimestamp(),
+              });
+              await addDoc(collection(db, 'customerTransactions'), {
+                customerId: custId,
+                customerName: custName,
+                type: isPartialPayment ? 'partial_credit_sale' : 'credit_sale',
+                amount: remainingDue,
+                paidToday: isPartialPayment ? tenderAmount : 0,
+                totalSale: finalTotal,
+                saleId: docRef.id,
+                note: isPartialPayment
+                  ? `Partial tender: $${tenderAmount.toFixed(2)} paid, $${remainingDue.toFixed(2)} store credit`
+                  : `Store credit invoice #${docRef.id.slice(-6).toUpperCase()}`,
+                timestamp: serverTimestamp(),
+              });
+            } else {
+              await updateDoc(doc(db, 'customers', custId), {
+                totalSpent: increment(finalTotal),
+                lastPurchaseDate: serverTimestamp(),
+              });
+            }
           } else {
-            await updateDoc(doc(db, 'customers', selectedCust.id), {
-              totalSpent: increment(subtotal),
-              lastPurchaseDate: serverTimestamp(),
-            });
+            // Newly created customer
+            if (remainingDue > 0) {
+              await addDoc(collection(db, 'customerTransactions'), {
+                customerId: custId,
+                customerName: custName,
+                type: isPartialPayment ? 'partial_credit_sale' : 'credit_sale',
+                amount: remainingDue,
+                paidToday: isPartialPayment ? tenderAmount : 0,
+                totalSale: finalTotal,
+                saleId: docRef.id,
+                note: `Initial credit balance: $${remainingDue.toFixed(2)} due`,
+                timestamp: serverTimestamp(),
+              });
+            }
           }
         } catch (custErr) {
           console.warn('Customer account update warning:', custErr);
@@ -223,6 +293,9 @@ export default function POSView() {
       setCartItems([]);
       setSelectedCustomerId('');
       setCustomerSearchQuery('');
+      setNewCustomerName('');
+      setNewCustomerPhone('');
+      setOrderDiscountValue('');
       setCheckoutModal(false);
       setReceiptOpen(true);
       setAmountPaid('');
@@ -417,8 +490,8 @@ export default function POSView() {
               {/* Customer Linking */}
               <div>
                 <label className="text-xs text-slate-400 mb-1 flex items-center justify-between">
-                  <span>Customer / VIP Salon</span>
-                  <span className="text-[10px] text-slate-500">Optional for Cash, Required for Credit</span>
+                  <span>Customer / VIP Account</span>
+                  <span className="text-[10px] text-slate-500">Optional for Full Cash, Required for Credit</span>
                 </label>
                 <select
                   value={selectedCustomerId}
@@ -433,7 +506,7 @@ export default function POSView() {
                   <option value="">Walk-in Customer (Retail / Direct)</option>
                   {customersList.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.name} {c.phone ? `(${c.phone})` : ''} - {c.type || 'Salon'} {c.balanceOwed > 0 ? `[Owes: $${c.balanceOwed}]` : ''}
+                      {c.name} {c.phone ? `(${c.phone})` : ''} - {c.customerType || 'VIP'} {c.balanceOwed > 0 ? `[Owes: $${c.balanceOwed.toFixed(2)}]` : ''}
                     </option>
                   ))}
                 </select>
@@ -461,18 +534,63 @@ export default function POSView() {
                 })()}
               </div>
 
+              {/* Order Discount (Amount or Percentage) */}
+              <div className="bg-slate-900/60 p-2.5 rounded-xl border border-slate-700/70 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-slate-300">Order Discount</span>
+                  <div className="flex items-center gap-1 bg-slate-800 p-0.5 rounded-lg border border-slate-700">
+                    <button
+                      type="button"
+                      onClick={() => setOrderDiscountType('percent')}
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold transition-colors ${
+                        orderDiscountType === 'percent'
+                          ? 'bg-[#efaa9b] text-[#45150b]'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      %
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrderDiscountType('fixed')}
+                      className={`px-2 py-0.5 rounded text-[11px] font-bold transition-colors ${
+                        orderDiscountType === 'fixed'
+                          ? 'bg-[#efaa9b] text-[#45150b]'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      $
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0"
+                    step={orderDiscountType === 'percent' ? '1' : '0.5'}
+                    value={orderDiscountValue}
+                    onChange={e => setOrderDiscountValue(e.target.value)}
+                    placeholder={orderDiscountType === 'percent' ? 'Enter discount % (e.g. 10)' : 'Enter discount $ (e.g. 5.00)'}
+                    className="flex-1 bg-slate-700 border border-slate-600 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-[#efaa9b]"
+                  />
+                  {orderDiscountAmount > 0 && (
+                    <span className="text-xs font-bold text-rose-300 flex-shrink-0">
+                      -${orderDiscountAmount.toFixed(2)}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Payment Method */}
               <div>
                 <label className="text-xs text-slate-400 mb-1 block">Payment Method</label>
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
                   {['Cash', 'MoMo', 'Card', 'Transfer', 'Store Credit'].map(m => {
                     const isCredit = m === 'Store Credit';
-                    const disabled = isCredit && !selectedCustomerId;
                     return (
                       <button
                         key={m}
                         type="button"
-                        disabled={disabled}
-                        title={disabled ? 'Select a customer first to enable Store Credit' : ''}
                         onClick={() => {
                           setPaymentMethod(m);
                           if (m === 'Store Credit') setAmountPaid('');
@@ -480,8 +598,6 @@ export default function POSView() {
                         className={`py-2 px-1 rounded-lg text-xs font-semibold transition-colors text-center ${
                           paymentMethod === m
                             ? isCredit ? 'bg-amber-500 text-slate-950 shadow-md font-bold' : 'bg-rose-500 text-white shadow-md'
-                            : disabled
-                            ? 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700/30'
                             : 'bg-slate-700 text-slate-300 hover:text-white'
                         }`}
                       >
@@ -492,41 +608,105 @@ export default function POSView() {
                 </div>
               </div>
 
-              {paymentMethod === 'Store Credit' ? (
-                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200">
-                  <p className="font-semibold flex items-center gap-1.5 text-amber-300">
-                    <CreditCard className="w-4 h-4" /> Store Credit Invoice
-                  </p>
-                  <p className="mt-1 text-[11px] text-amber-200/80">
-                    This sale will be charged to the customer's open account. No cash collected at drawer today.
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div>
-                    <label className="text-xs text-slate-400 mb-1 block">Amount Tendered (USD)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={amountPaid}
-                      onChange={e => setAmountPaid(e.target.value)}
-                      placeholder={subtotal.toFixed(2)}
-                      className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-rose-400"
-                    />
+              {/* Amount Tendered (when not full Store Credit) */}
+              {!isStoreCredit && (
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs text-slate-400">Amount Tendered (USD)</label>
+                    <span className="text-[11px] text-slate-500">Total: ${finalTotal.toFixed(2)}</span>
                   </div>
-
-                  {amountPaid && (
-                    <div className="flex justify-between text-sm py-1">
-                      <span className="text-slate-400">Change Due:</span>
-                      <span className="text-green-400 font-bold">${change.toFixed(2)}</span>
-                    </div>
-                  )}
-                </>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={amountPaid}
+                    onChange={e => setAmountPaid(e.target.value)}
+                    placeholder={finalTotal.toFixed(2)}
+                    className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-rose-400"
+                  />
+                </div>
               )}
 
-              <div className="flex justify-between items-center font-bold text-white border-t border-slate-700 pt-2.5">
-                <span className="text-sm">Total Due</span>
-                <span className="text-lg text-rose-300">{format(subtotal)}</span>
+              {/* Partial Tender / Store Credit Notice & Customer Inputs */}
+              {remainingDue > 0 && (
+                <div className="p-3 bg-amber-950/40 border-2 border-amber-500/50 rounded-xl text-xs space-y-2.5 animate-fade-in">
+                  <div className="flex items-start gap-2 text-amber-300">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-amber-400" />
+                    <div>
+                      <p className="font-bold text-sm">
+                        {isStoreCredit ? 'Full Store Credit Invoice' : 'Partial Payment — Credit Balance Due'}
+                      </p>
+                      <p className="text-[11px] text-amber-200/90 mt-0.5 leading-relaxed">
+                        {isStoreCredit
+                          ? `This entire sale ($${finalTotal.toFixed(2)}) will be charged as Store Credit.`
+                          : `Tendered $${tenderAmount.toFixed(2)} out of $${finalTotal.toFixed(2)}. The remaining $${remainingDue.toFixed(2)} will be added to customer credit.`}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* If no customer selected from dropdown, prompt for name and phone on the spot */}
+                  {!selectedCustomerId ? (
+                    <div className="space-y-2 pt-1 border-t border-amber-800/40">
+                      <p className="text-[11px] font-semibold text-amber-200">
+                        Enter Customer Details for Customers & VIP Accounts:
+                      </p>
+                      <input
+                        type="text"
+                        value={newCustomerName}
+                        onChange={e => setNewCustomerName(e.target.value)}
+                        placeholder="Customer / VIP Name *"
+                        className="w-full bg-slate-800 border border-amber-600/60 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-amber-400"
+                      />
+                      <input
+                        type="text"
+                        value={newCustomerPhone}
+                        onChange={e => setNewCustomerPhone(e.target.value)}
+                        placeholder="Customer Phone (e.g. 0770123456)"
+                        className="w-full bg-slate-800 border border-amber-600/60 rounded-lg px-3 py-1.5 text-white text-xs focus:outline-none focus:border-amber-400"
+                      />
+                      <p className="text-[10px] text-amber-300/80">
+                        ✓ Will automatically create/update an account in <strong>Customers & VIP Accounts</strong> with a balance due of ${remainingDue.toFixed(2)}.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="p-2 bg-slate-900/60 rounded-lg border border-amber-500/30 text-[11px] text-amber-200">
+                      Charging <strong>${remainingDue.toFixed(2)}</strong> balance to existing account: <strong>{customersList.find(c => c.id === selectedCustomerId)?.name}</strong>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Change Due (when overpaid) */}
+              {change > 0 && (
+                <div className="flex justify-between text-sm py-1">
+                  <span className="text-slate-400">Change Due:</span>
+                  <span className="text-green-400 font-bold">${change.toFixed(2)}</span>
+                </div>
+              )}
+
+              {/* Order Totals Summary */}
+              <div className="space-y-1 border-t border-slate-700 pt-2.5 text-xs">
+                {orderDiscountAmount > 0 && (
+                  <div className="flex justify-between text-slate-400">
+                    <span>Subtotal:</span>
+                    <span>${subtotal.toFixed(2)}</span>
+                  </div>
+                )}
+                {orderDiscountAmount > 0 && (
+                  <div className="flex justify-between text-rose-300 font-semibold">
+                    <span>Order Discount ({orderDiscountType === 'percent' ? `${orderDiscountValue}%` : `$${orderDiscountValue}`}):</span>
+                    <span>-${orderDiscountAmount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between items-center font-bold text-white text-sm pt-0.5">
+                  <span>Total Due:</span>
+                  <span className="text-lg text-rose-300">{format(finalTotal)}</span>
+                </div>
+                {remainingDue > 0 && !isStoreCredit && (
+                  <div className="flex justify-between text-amber-300 font-semibold pt-1 border-t border-slate-700/60">
+                    <span>Store Credit Balance:</span>
+                    <span>${remainingDue.toFixed(2)}</span>
+                  </div>
+                )}
               </div>
             </div>
 

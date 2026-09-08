@@ -144,9 +144,9 @@ export default function CustomerAccountsView() {
         <div>
           <h2 className="text-lg font-bold text-white flex items-center gap-2">
             <Users className="w-5 h-5 text-[#efaa9b]" />
-            <span>Customer & VIP Salon Accounts</span>
+            <span>Customers & VIP Accounts</span>
           </h2>
-          <p className="text-xs text-slate-400">Wholesale client accounts, credit balances & payment tracking</p>
+          <p className="text-xs text-slate-400">Client profiles, store credit balances & payment tracking</p>
         </div>
 
         <button
@@ -155,7 +155,7 @@ export default function CustomerAccountsView() {
           className="flex items-center gap-1.5 px-4 py-2 bg-[#efaa9b] hover:bg-[#e89887] text-[#45150b] rounded-xl text-xs font-bold transition-colors shadow-md shadow-[#efaa9b]/20"
         >
           <UserPlus className="w-4 h-4" />
-          <span>Add New Client / Salon</span>
+          <span>Add New Account</span>
         </button>
       </div>
 
@@ -186,21 +186,21 @@ export default function CustomerAccountsView() {
               type="text"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Search by salon name or phone..."
+              placeholder="Search by customer name, VIP account or phone..."
               className="w-full bg-slate-700/60 border border-slate-600 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-400 focus:outline-none focus:border-[#efaa9b]"
             />
           </div>
-          <span className="text-xs text-slate-400">{filteredCustomers.length} clients</span>
+          <span className="text-xs text-slate-400">{filteredCustomers.length} accounts</span>
         </div>
 
         {loading ? (
-          <p className="text-slate-500 text-xs py-8 text-center">Loading clients...</p>
+          <p className="text-slate-500 text-xs py-8 text-center">Loading accounts...</p>
         ) : filteredCustomers.length > 0 ? (
           <div className="overflow-x-auto rounded-xl border border-slate-700">
             <table className="w-full text-xs">
               <thead>
                 <tr className="bg-slate-800 text-slate-400 border-b border-slate-700">
-                  <th className="text-left px-3 py-2.5">Client / Salon Name</th>
+                  <th className="text-left px-3 py-2.5">Customer / VIP Name</th>
                   <th className="text-left px-3 py-2.5">Type</th>
                   <th className="text-left px-3 py-2.5">Phone Number</th>
                   <th className="text-right px-3 py-2.5">Total Spent</th>
@@ -277,7 +277,7 @@ export default function CustomerAccountsView() {
       <Modal
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
-        title={editCustomer ? `Edit Client — ${editCustomer.name}` : 'Register New Client / Salon'}
+        title={editCustomer ? `Edit Account — ${editCustomer.name}` : 'Register New Customer / VIP Account'}
         size="md"
         footer={
           <div className="flex gap-2 justify-end">
@@ -294,7 +294,7 @@ export default function CustomerAccountsView() {
               disabled={saving}
               className="px-5 py-2 bg-[#efaa9b] hover:bg-[#e89887] text-[#45150b] rounded-xl text-xs font-bold transition-colors shadow-md shadow-[#efaa9b]/20"
             >
-              {saving ? 'Saving...' : editCustomer ? 'Save Changes' : 'Register Client'}
+              {saving ? 'Saving...' : editCustomer ? 'Save Changes' : 'Register Account'}
             </button>
           </div>
         }
@@ -308,14 +308,14 @@ export default function CustomerAccountsView() {
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1">
-              Client / Salon Name *
+              Customer / Account Name *
             </label>
             <input
               type="text"
               value={name}
               onChange={e => setName(e.target.value)}
               required
-              placeholder="e.g. Royal Crown Salon & Spa"
+              placeholder="e.g. Jessica Doe / VIP Client"
               className="w-full bg-slate-700 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-[#efaa9b]"
             />
           </div>
@@ -363,7 +363,7 @@ export default function CustomerAccountsView() {
               className="w-full bg-slate-700 border border-slate-600 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:border-[#efaa9b]"
             />
             <span className="text-[11px] text-slate-400 mt-1 block">
-              Maximum credit allowance allowed for this salon on credit purchases.
+              Maximum credit allowance allowed for this customer on credit purchases.
             </span>
           </div>
         </form>

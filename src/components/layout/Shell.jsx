@@ -31,7 +31,7 @@ const MODULE_LABELS = {
   pos:        'Point of Sale',
   inventory:  'Inventory Management',
   finance:    'Finance & Reports',
-  customers:  'Customer & Salon Accounts',
+  customers:  'Customers & VIP Accounts',
   attendance: 'Staff Attendance',
   delivery:   'Delivery Logistics',
   staff:      'Staff Management',
