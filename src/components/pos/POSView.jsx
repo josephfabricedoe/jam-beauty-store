@@ -8,7 +8,7 @@ import BarcodeScanner from './BarcodeScanner';
 import Cart from './Cart';
 import ReceiptModal from './ReceiptModal';
 import { getPriceForMode } from './PricingModeSwitcher';
-import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth } from 'lucide-react';
+import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth, X } from 'lucide-react';
 import { connectBluetoothPrinter, getConnectedPrinterName } from '../../utils/bluetoothPrinter';
 
 export default function POSView() {
@@ -482,11 +482,26 @@ export default function POSView() {
 
       {/* Checkout modal */}
       {checkoutModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setCheckoutModal(false)} />
-          <div className="relative bg-slate-800 border border-slate-700 rounded-2xl p-5 w-full max-w-sm shadow-2xl">
-            <h3 className="text-lg font-semibold text-white mb-4">Complete Sale</h3>
-            <div className="space-y-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setCheckoutModal(false)} />
+          <div className="relative bg-slate-800 border border-slate-700 rounded-2xl w-full max-w-md max-h-[90vh] max-h-[90dvh] flex flex-col shadow-2xl overflow-hidden my-auto z-10">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700 flex-shrink-0 bg-slate-800/95">
+              <div className="flex items-center gap-2">
+                <ShoppingBag className="w-5 h-5 text-rose-400" />
+                <h3 className="text-base font-semibold text-white">Complete Sale</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCheckoutModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-700 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 overscroll-contain">
               {/* Customer Linking */}
               <div>
                 <label className="text-xs text-slate-400 mb-1 flex items-center justify-between">
@@ -710,19 +725,29 @@ export default function POSView() {
               </div>
             </div>
 
-            <div className="flex gap-2 mt-5">
+            {/* Sticky Fixed Bottom Action Buttons */}
+            <div className="p-3.5 sm:p-4 border-t border-slate-700 flex-shrink-0 bg-slate-800/95 flex gap-2">
               <button
+                type="button"
                 onClick={() => setCheckoutModal(false)}
-                className="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-sm transition-colors"
+                className="flex-1 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-sm font-medium transition-colors"
               >
                 Cancel
               </button>
               <button
+                type="button"
                 onClick={handleCheckout}
                 disabled={processing}
-                className="flex-1 py-2.5 bg-rose-500 hover:bg-rose-400 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-rose-500/20"
+                className="flex-[2] py-2.5 bg-rose-500 hover:bg-rose-400 disabled:opacity-50 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-rose-500/20 flex items-center justify-center gap-2"
               >
-                {processing ? 'Processing...' : 'Confirm Sale'}
+                {processing ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <span>Confirm Sale ({format(finalTotal)})</span>
+                )}
               </button>
             </div>
           </div>
