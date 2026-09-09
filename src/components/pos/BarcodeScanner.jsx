@@ -1,16 +1,30 @@
 import React, { useState } from 'react';
-import { Search, Barcode, Camera } from 'lucide-react';
+import { Search, Barcode, Camera, X } from 'lucide-react';
 import BarcodeScannerModal from '../shared/BarcodeScannerModal';
 
-export default function BarcodeScanner({ onSearch }) {
-  const [query, setQuery] = useState('');
+export default function BarcodeScanner({ onSearch, searchQuery, onSearchQueryChange }) {
+  const [internalQuery, setInternalQuery] = useState('');
   const [scannerOpen, setScannerOpen] = useState(false);
+
+  const isControlled = typeof searchQuery === 'string' && Boolean(onSearchQueryChange);
+  const currentQuery = isControlled ? searchQuery : internalQuery;
+
+  const handleInputChange = (val) => {
+    if (isControlled) {
+      onSearchQueryChange(val);
+    } else {
+      setInternalQuery(val);
+    }
+  };
+
+  const handleClear = () => {
+    handleInputChange('');
+  };
 
   const handleSearch = (e) => {
     e.preventDefault();
-    if (query.trim()) {
-      onSearch(query.trim());
-      setQuery('');
+    if (currentQuery.trim()) {
+      onSearch(currentQuery.trim());
     }
   };
 
@@ -28,11 +42,21 @@ export default function BarcodeScanner({ onSearch }) {
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
           <input
             type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
+            value={currentQuery}
+            onChange={e => handleInputChange(e.target.value)}
             placeholder="Search product name or barcode..."
-            className="w-full bg-slate-700/60 border border-slate-600 rounded-xl pl-10 pr-24 py-3 text-white placeholder-slate-400 focus:outline-none focus:border-[#efaa9b] focus:ring-1 focus:ring-[#efaa9b] transition-colors text-sm"
+            className="w-full bg-slate-700/60 border border-slate-600 rounded-xl pl-10 pr-28 py-3 text-white placeholder-slate-400 focus:outline-none focus:border-[#efaa9b] focus:ring-1 focus:ring-[#efaa9b] transition-colors text-sm"
           />
+          {currentQuery && (
+            <button
+              type="button"
+              onClick={handleClear}
+              className="absolute right-20 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-white transition-colors"
+              title="Clear search"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
           <button
             type="submit"
             className="absolute right-1.5 top-1.5 bottom-1.5 px-4 bg-[#efaa9b] hover:bg-[#e89887] text-[#45150b] rounded-lg font-bold text-xs transition-colors shadow-sm"

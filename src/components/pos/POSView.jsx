@@ -9,8 +9,9 @@ import Cart from './Cart';
 import ReceiptModal from './ReceiptModal';
 import ReceiptsHistoryModal from './ReceiptsHistoryModal';
 import { getPriceForMode } from './PricingModeSwitcher';
-import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth, X, Receipt } from 'lucide-react';
+import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth, X, Receipt, Filter, RotateCcw } from 'lucide-react';
 import { connectBluetoothPrinter, getConnectedPrinterName } from '../../utils/bluetoothPrinter';
+import { CATEGORIES, getProductPrimaryCategory } from '../public/CustomerCatalog';
 
 export default function POSView() {
   const { currentUser } = useAuth();
@@ -22,6 +23,9 @@ export default function POSView() {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [customerSearchQuery, setCustomerSearchQuery] = useState('');
   const [selectedPosCategory, setSelectedPosCategory] = useState('All');
+  const [selectedSubCategory, setSelectedSubCategory] = useState('All');
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [posSearchQuery, setPosSearchQuery] = useState('');
   const [cartItems, setCartItems] = useState([]);
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -59,6 +63,81 @@ export default function POSView() {
     });
     return unsub;
   }, []);
+
+  // Live category counts matching the website categories
+  const categoryCounts = React.useMemo(() => {
+    const counts = { All: allProducts.length };
+    allProducts.forEach(p => {
+      const cat = getProductPrimaryCategory(p);
+      counts[cat] = (counts[cat] || 0) + 1;
+    });
+    return counts;
+  }, [allProducts]);
+
+  // Showroom in-stock count
+  const inStockCount = React.useMemo(() => {
+    return allProducts.filter(p => (Number(p.showroomQty) || 0) > 0).length;
+  }, [allProducts]);
+
+  // Dynamic subcategories for currently active category
+  const availableSubCategories = React.useMemo(() => {
+    if (selectedPosCategory === 'All') return [];
+    const map = new Map();
+    allProducts.forEach(p => {
+      if (getProductPrimaryCategory(p) === selectedPosCategory) {
+        let sub = (p.category || p.type || '').trim();
+        if (sub) {
+          sub = sub.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+          map.set(sub, (map.get(sub) || 0) + 1);
+        }
+      }
+    });
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [allProducts, selectedPosCategory]);
+
+  // Unified real-time filtered catalog products
+  const displayedCatalogProducts = React.useMemo(() => {
+    return allProducts.filter(p => {
+      // 1. Showroom stock filter
+      if (inStockOnly && (Number(p.showroomQty) || 0) <= 0) {
+        return false;
+      }
+
+      // 2. Primary category filter (matching website)
+      if (selectedPosCategory !== 'All') {
+        const primary = getProductPrimaryCategory(p);
+        if (primary !== selectedPosCategory) return false;
+
+        // 3. Subcategory filter
+        if (selectedSubCategory !== 'All') {
+          let sub = (p.category || p.type || '').trim();
+          if (sub.toLowerCase() !== selectedSubCategory.toLowerCase()) return false;
+        }
+      }
+
+      // 4. Instant live search filter
+      if (posSearchQuery.trim()) {
+        const q = posSearchQuery.toLowerCase();
+        const matches = (p.name || '').toLowerCase().includes(q) ||
+          (p.barcode || p.id || '').toString().toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q);
+        if (!matches) return false;
+      }
+
+      return true;
+    });
+  }, [allProducts, selectedPosCategory, selectedSubCategory, inStockOnly, posSearchQuery]);
+
+  const resetPosFilters = () => {
+    setSelectedPosCategory('All');
+    setSelectedSubCategory('All');
+    setInStockOnly(false);
+    setPosSearchQuery('');
+    setSearchResults([]);
+    setSearchError('');
+  };
 
   const handleSearch = (rawQuery) => {
     if (!rawQuery) return;
@@ -316,7 +395,11 @@ export default function POSView() {
     <div className="h-full flex flex-col md:flex-row gap-0">
       {/* Left: Search & Catalog panel */}
       <div className="md:w-1/2 md:border-r border-slate-800 p-4 flex flex-col gap-4 overflow-y-auto">
-        <BarcodeScanner onSearch={handleSearch} />
+        <BarcodeScanner
+          onSearch={handleSearch}
+          searchQuery={posSearchQuery}
+          onSearchQueryChange={setPosSearchQuery}
+        />
 
         {lastAddedProduct && (
           <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 px-3.5 py-2 rounded-xl text-xs font-medium animate-fade-in">
@@ -333,124 +416,199 @@ export default function POSView() {
           </p>
         )}
 
-        {/* Search Results */}
-        {searchResults.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs text-slate-400 font-medium">
-              {searchResults.length} product{searchResults.length !== 1 ? 's' : ''} found:
-            </p>
-            <div className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
-              {searchResults.map(p => (
+        {/* Store Catalog with Website-aligned Categories & Subcategories */}
+        <div className="flex-1 flex flex-col min-h-0 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                Catalog ({displayedCatalogProducts.length} items)
+              </span>
+              {posSearchQuery && (
+                <span className="text-[11px] text-[#efaa9b] font-medium">
+                  Matching "{posSearchQuery}"
+                </span>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {(selectedPosCategory !== 'All' || selectedSubCategory !== 'All' || inStockOnly || posSearchQuery) && (
                 <button
-                  key={p.id || p.barcode}
-                  onClick={() => addToCart(p)}
-                  className="w-full text-left bg-slate-800 hover:bg-slate-700/80 border border-slate-700 hover:border-[#efaa9b]/60 rounded-xl p-2.5 transition-all flex items-center gap-3 group"
+                  type="button"
+                  onClick={resetPosFilters}
+                  className="text-[11px] text-[#efaa9b] hover:text-[#e89887] font-semibold flex items-center gap-1 transition-colors"
                 >
-                  {/* Photo thumbnail */}
-                  {p.imageUrl ? (
-                    <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-600 bg-black/40 flex-shrink-0">
-                      <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
-                    </div>
-                  ) : (
-                    <div className="w-12 h-12 rounded-lg border border-slate-700 bg-slate-900/60 flex items-center justify-center flex-shrink-0 text-slate-500 font-bold text-sm">
-                      {(p.name || 'P')[0].toUpperCase()}
-                    </div>
-                  )}
-
-                  <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-white text-xs truncate group-hover:text-[#efaa9b]">
-                      {p.name}
-                    </p>
-                    <p className="text-[11px] text-slate-400 flex items-center gap-1.5 mt-0.5">
-                      <span className="font-mono text-slate-500">{p.barcode || 'No barcode'}</span>
-                      <span>·</span>
-                      <span className="text-slate-400">{p.category}</span>
-                    </p>
-                  </div>
-
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-rose-300 font-bold text-xs">{format(p.retailPrice)}</p>
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                      (p.showroomQty || 0) < 5 ? 'bg-red-900/50 text-red-300' : 'text-slate-400'
-                    }`}>
-                      {(p.showroomQty || 0) < 5 ? `Low: ${p.showroomQty || 0}` : `${p.showroomQty || 0} in stock`}
-                    </span>
-                  </div>
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Reset Filters</span>
                 </button>
-              ))}
+              )}
+              <span className="text-[11px] text-slate-500 hidden sm:inline">Tap item to add</span>
             </div>
           </div>
-        )}
 
-        {/* Quick Product Pick List when not searching */}
-        {searchResults.length === 0 && !searching && !searchError && (
-          <div className="flex-1 flex flex-col min-h-0 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                Store Catalog ({allProducts.length} items)
-              </span>
-              <span className="text-[11px] text-slate-500">Tap item to add to cart</span>
-            </div>
+          {/* Primary Category Filter Tabs (Exact match with website categories) */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+            {CATEGORIES.map(cat => {
+              const count = categoryCounts[cat.id] || 0;
+              const isSelected = selectedPosCategory === cat.id;
 
-            {/* Quick Category Filter Chips */}
-            <div className="flex items-center gap-1 overflow-x-auto pb-1">
-              {['All', 'Perfume', 'Cosmetics', 'Skincare', 'Haircare', 'Accessories', 'Body Care', 'Other'].map(cat => (
+              return (
                 <button
-                  key={cat}
+                  key={cat.id}
                   type="button"
-                  onClick={() => setSelectedPosCategory(cat)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
-                    selectedPosCategory === cat
-                      ? 'bg-[#efaa9b] text-[#45150b] font-bold shadow-sm'
+                  onClick={() => {
+                    setSelectedPosCategory(cat.id);
+                    setSelectedSubCategory('All');
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 flex-shrink-0 ${
+                    isSelected
+                      ? 'bg-[#efaa9b] text-[#45150b] font-bold shadow-md shadow-[#efaa9b]/20 scale-102'
+                      : 'bg-slate-800/80 text-slate-300 hover:text-white hover:bg-slate-800 border border-slate-700/60'
+                  }`}
+                >
+                  <span>{cat.label}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                    isSelected ? 'bg-[#45150b]/20 text-[#45150b]' : 'bg-slate-700 text-slate-400'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+
+            {/* Quick In-Stock Filter Toggle */}
+            <button
+              type="button"
+              onClick={() => setInStockOnly(v => !v)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 flex-shrink-0 border ${
+                inStockOnly
+                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
+                  : 'bg-slate-800/80 text-slate-300 hover:text-white border-slate-700/60'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full ${inStockOnly ? 'bg-white' : 'bg-emerald-400'}`} />
+              <span>In Stock Only</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                inStockOnly ? 'bg-emerald-700 text-white' : 'bg-slate-700 text-slate-400'
+              }`}>
+                {inStockCount}
+              </span>
+            </button>
+          </div>
+
+          {/* Subcategory Pills Bar (When specific category is active, e.g. Skincare -> Serum, Face Wash, etc.) */}
+          {selectedPosCategory !== 'All' && availableSubCategories.length > 0 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar bg-slate-900/60 p-1.5 rounded-xl border border-slate-800">
+              <span className="text-[10px] uppercase font-bold text-slate-500 mr-1 flex-shrink-0">
+                Type:
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedSubCategory('All')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all flex-shrink-0 ${
+                  selectedSubCategory === 'All'
+                    ? 'bg-slate-200 text-slate-900 font-bold shadow-xs'
+                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                }`}
+              >
+                All Types ({categoryCounts[selectedPosCategory] || 0})
+              </button>
+              {availableSubCategories.map(sub => (
+                <button
+                  key={sub.name}
+                  type="button"
+                  onClick={() => setSelectedSubCategory(sub.name)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition-all flex items-center gap-1 flex-shrink-0 ${
+                    selectedSubCategory.toLowerCase() === sub.name.toLowerCase()
+                      ? 'bg-slate-200 text-slate-900 font-bold shadow-xs'
                       : 'bg-slate-800 text-slate-400 hover:text-white'
                   }`}
                 >
-                  {cat}
+                  <span>{sub.name}</span>
+                  <span className={`text-[10px] px-1 rounded-full ${
+                    selectedSubCategory.toLowerCase() === sub.name.toLowerCase()
+                      ? 'bg-slate-300 text-slate-900'
+                      : 'bg-slate-700/60 text-slate-500'
+                  }`}>
+                    {sub.count}
+                  </span>
                 </button>
               ))}
             </div>
+          )}
 
-            {allProducts.length === 0 ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-600 py-12">
-                <PackageOpen className="w-10 h-10 mb-2 opacity-40" />
-                <p className="text-sm">No products in catalog yet.</p>
-                <p className="text-xs text-slate-600">Import your inventory CSV or add products in Inventory.</p>
+          {/* Products Grid */}
+          {displayedCatalogProducts.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-500 py-12 space-y-3 bg-slate-900/30 rounded-2xl border border-slate-800/60">
+              <PackageOpen className="w-10 h-10 opacity-40 text-slate-400" />
+              <div className="text-center">
+                <p className="text-sm font-semibold text-slate-300">No products found</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  No items match category "{selectedSubCategory !== 'All' ? selectedSubCategory : selectedPosCategory}"
+                  {posSearchQuery ? ` and search "${posSearchQuery}"` : ''}.
+                </p>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 overflow-y-auto max-h-[calc(100vh-320px)] pr-1">
-                {allProducts
-                  .filter(p => selectedPosCategory === 'All' || (p.category || 'Other') === selectedPosCategory)
-                  .map(p => (
-                    <button
-                      key={p.id || p.barcode}
-                      onClick={() => addToCart(p)}
-                      className="text-left bg-slate-800/60 hover:bg-slate-800 border border-slate-700/70 hover:border-[#efaa9b]/60 rounded-xl p-2 transition-all flex items-center gap-2.5"
-                    >
-                      {/* Thumbnail photo */}
-                      {p.imageUrl ? (
-                        <div className="w-11 h-11 rounded-lg overflow-hidden border border-slate-700 bg-black/40 flex-shrink-0">
-                          <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover" />
-                        </div>
-                      ) : (
-                        <div className="w-11 h-11 rounded-lg border border-slate-700 bg-slate-900/60 flex items-center justify-center flex-shrink-0 text-slate-500 font-bold text-xs">
-                          {(p.name || 'P')[0].toUpperCase()}
-                        </div>
-                      )}
+              <button
+                type="button"
+                onClick={resetPosFilters}
+                className="px-4 py-2 bg-[#efaa9b] text-[#45150b] rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+              >
+                Reset All Filters
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 overflow-y-auto max-h-[calc(100vh-320px)] pr-1">
+              {displayedCatalogProducts.map(p => {
+                const inStock = (Number(p.showroomQty) || 0) > 0;
 
-                      <div className="min-w-0 flex-1">
-                        <p className="font-semibold text-white text-xs truncate">{p.name}</p>
-                        <p className="text-[10px] text-slate-400 truncate">{p.barcode || p.category || '—'}</p>
-                        <div className="flex items-center justify-between mt-0.5">
-                          <span className="text-rose-300 font-bold text-xs">{format(p.retailPrice)}</span>
-                          <span className="text-[10px] text-slate-400 font-medium">{p.showroomQty || 0} in stock</span>
-                        </div>
+                return (
+                  <button
+                    key={p.id || p.barcode}
+                    onClick={() => addToCart(p)}
+                    className="text-left bg-slate-800/60 hover:bg-slate-800 border border-slate-700/70 hover:border-[#efaa9b]/60 rounded-xl p-2.5 transition-all flex items-center gap-2.5 group cursor-pointer shadow-xs active:scale-[0.99]"
+                  >
+                    {/* Thumbnail photo */}
+                    {p.imageUrl ? (
+                      <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-700 bg-black/40 flex-shrink-0">
+                        <img src={p.imageUrl} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                       </div>
-                    </button>
-                  ))}
-              </div>
-            )}
-          </div>
-        )}
+                    ) : (
+                      <div className="w-12 h-12 rounded-lg border border-slate-700 bg-slate-900/80 flex items-center justify-center flex-shrink-0 text-[#efaa9b] font-bold text-xs shadow-inner">
+                        {(p.name || 'P')[0].toUpperCase()}
+                      </div>
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-white text-xs truncate group-hover:text-[#efaa9b] transition-colors">
+                        {p.name}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400">
+                        <span className="bg-slate-700/80 text-slate-300 px-1.5 py-0.2 rounded font-medium truncate max-w-[110px]">
+                          {p.category || 'Beauty'}
+                        </span>
+                        {p.barcode && (
+                          <span className="font-mono text-slate-500 truncate">{p.barcode}</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center justify-between mt-1 pt-1 border-t border-slate-700/40">
+                        <span className="text-rose-300 font-bold text-xs">
+                          {format(p.retailPrice)}
+                        </span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded font-semibold ${
+                          inStock
+                            ? 'bg-emerald-950/50 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-500 border border-slate-700'
+                        }`}>
+                          {inStock ? `${p.showroomQty} in stock` : 'Order req'}
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Right: Cart panel */}
