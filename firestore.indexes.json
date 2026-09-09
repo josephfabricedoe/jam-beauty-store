@@ -1,13 +1,4 @@
-VITE_FIREBASE_API_KEY=apiKey: "AIzaSyABnn-dG_UIJ-3UpbfvL5KMP0gBey6rkI8",
-  authDomain: "jam-beauty-store-online.firebaseapp.com",
-  projectId: "jam-beauty-store-online",
-  storageBucket: "jam-beauty-store-online.firebasestorage.app",
-  messagingSenderId: "794552738927",
-  appId: "1:794552738927:web:c544c1b3bce5fe18b5199a",
-  measurementId: "G-QSCJCXBW84"
-};
-VITE_FIREBASE_AUTH_DOMAIN=jam-beauty-store-online.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=jam-beauty-store-online
-VITE_FIREBASE_STORAGE_BUCKET=jam-beauty-store-online.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=794552738927
-VITE_FIREBASE_APP_ID=1:794552738927:web:c544c1b3bce5fe18b5199a
+{
+  "indexes": [],
+  "fieldOverrides": []
+}

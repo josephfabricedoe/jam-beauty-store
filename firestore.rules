@@ -65,9 +65,10 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
-    // Store Settings & Config
+    // Store Settings & Config (public read for catalog exchange rate, WhatsApp number & store info)
     match /storeSettings/{docId} {
-      allow read, write: if isAuthenticated();
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
 
     // Fallback: allow authenticated store users read/write
