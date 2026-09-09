@@ -5,24 +5,29 @@ import { useApp } from '../../contexts/AppContext';
 import {
   Search, ShoppingBag, MessageCircle, MapPin, Phone,
   Sparkles, Check, ChevronRight, X, ArrowUpRight, ShieldCheck,
-  Truck, Plus, Minus, Trash2, ArrowRight, CheckCircle2
+  Truck, Plus, Minus, Trash2, ArrowRight, CheckCircle2,
+  SlidersHorizontal, ArrowUpDown, RotateCcw, Filter
 } from 'lucide-react';
 
 export const CATEGORIES = [
   { id: 'All', label: 'ALL' },
   { id: 'Perfume', label: 'PERFUME' },
-  { id: 'Hair', label: 'HAIR' },
+  { id: 'Skincare', label: 'SKINCARE' },
   { id: 'Body Lotion', label: 'BODY LOTION' },
-  { id: 'Body Oil', label: 'BODY OIL' },
-  { id: 'Other Products', label: 'OTHER PRODUCTS' },
+  { id: 'Body Care', label: 'BODY CARE' },
+  { id: 'Hair', label: 'HAIR' },
+  { id: 'Wholesale Sets', label: 'WHOLESALE' },
+  { id: 'Other Products', label: 'OTHER' },
 ];
 
 export function getProductPrimaryCategory(product) {
   const cat = (product.category || product.type || '').trim().toLowerCase();
-  if (cat.includes('perfume') || cat.includes('fragrance') || cat.includes('cologne')) return 'Perfume';
-  if (cat.includes('hair')) return 'Hair';
+  if (cat.includes('perfume') || cat.includes('fragrance') || cat.includes('cologne') || cat.includes('body spray') || cat.includes('roll-on') || cat.includes('mist')) return 'Perfume';
+  if (cat.includes('serum') || cat.includes('face') || cat.includes('sunscreen') || cat.includes('toner') || cat.includes('treatment')) return 'Skincare';
   if (cat.includes('body lotion') || (cat.includes('lotion') && !cat.includes('oil'))) return 'Body Lotion';
-  if (cat.includes('body oil') || (cat.includes('oil') && !cat.includes('hair') && !cat.includes('lotion'))) return 'Body Oil';
+  if (cat.includes('body oil') || cat.includes('oil') || cat.includes('body wash') || cat.includes('soap') || cat.includes('scrub')) return 'Body Care';
+  if (cat.includes('hair')) return 'Hair';
+  if (cat.includes('package set') || cat.includes('maria bel') || cat.includes('set') || cat.includes('wholesale')) return 'Wholesale Sets';
   return 'Other Products';
 }
 
@@ -42,6 +47,14 @@ export default function CustomerCatalog({ onGoToLogin }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [activeSubCategory, setActiveSubCategory] = useState('All');
+  
+  // Refined Product Filters & Sorting
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [priceBracket, setPriceBracket] = useState('all'); // 'all' | 'under-10' | '10-20' | '20-35' | '35-plus'
+  const [sortBy, setSortBy] = useState('featured'); // 'featured' | 'price-asc' | 'price-desc' | 'name-asc' | 'instock-first'
+  const [selectedRawCategory, setSelectedRawCategory] = useState('All');
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+
   const { exchangeRate, storeSettings } = useApp();
 
   // Multi-item Shopping Cart with localStorage persistence
@@ -134,6 +147,41 @@ export default function CustomerCatalog({ onGoToLogin }) {
   const totalCartUSD = cart.reduce((sum, item) => sum + (Number(item.product.retailPrice || 0) * item.quantity), 0);
   const totalCartLRD = (totalCartUSD * (exchangeRate || 197)).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
+  // Distinct raw categories extracted from database with live counts
+  const allRawCategories = React.useMemo(() => {
+    const map = new Map();
+    products.forEach(p => {
+      let cat = (p.category || 'Other').trim();
+      if (cat) {
+        map.set(cat, (map.get(cat) || 0) + 1);
+      }
+    });
+    return Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [products]);
+
+  // Count of items in showroom stock
+  const inStockCount = React.useMemo(() => {
+    return products.filter(p => (p.showroomQty || 0) > 0).length;
+  }, [products]);
+
+  // Active filter count indicator
+  const activeFiltersCount = (inStockOnly ? 1 : 0) +
+    (priceBracket !== 'all' ? 1 : 0) +
+    (selectedRawCategory !== 'All' ? 1 : 0) +
+    (sortBy !== 'featured' ? 1 : 0);
+
+  const clearAllFilters = () => {
+    setInStockOnly(false);
+    setPriceBracket('all');
+    setSortBy('featured');
+    setSelectedRawCategory('All');
+    setActiveCategory('All');
+    setActiveSubCategory('All');
+    setSearchTerm('');
+  };
+
   // Dynamically extract all distinct types/categories for products grouped under "Other Products"
   const otherSubCategories = React.useMemo(() => {
     const map = new Map();
@@ -153,33 +201,80 @@ export default function CustomerCatalog({ onGoToLogin }) {
       .sort((a, b) => b.count - a.count);
   }, [products]);
 
-  // Filtering products
-  const filtered = products.filter(p => {
-    const primaryCat = getProductPrimaryCategory(p);
-
-    if (activeCategory !== 'All') {
-      if (activeCategory === 'Other Products') {
-        if (primaryCat !== 'Other Products') return false;
-        if (activeSubCategory !== 'All') {
-          let pSub = (p.category || p.type || '').trim();
-          if (!pSub || pSub.toLowerCase() === 'other' || pSub.toLowerCase() === 'other products') {
-            pSub = 'General';
-          }
-          if (pSub.toLowerCase() !== activeSubCategory.toLowerCase()) return false;
-        }
-      } else {
-        if (primaryCat !== activeCategory) return false;
+  // Comprehensive Filtering & Sorting
+  const filtered = React.useMemo(() => {
+    let result = products.filter(p => {
+      // 1. Text Search
+      if (searchTerm.trim()) {
+        const q = searchTerm.toLowerCase();
+        const matches = (p.name || '').toLowerCase().includes(q) ||
+          (p.category || '').toLowerCase().includes(q) ||
+          (p.barcode || '').toLowerCase().includes(q);
+        if (!matches) return false;
       }
-    }
 
-    if (!searchTerm.trim()) return true;
-    const q = searchTerm.toLowerCase();
-    return (
-      (p.name || '').toLowerCase().includes(q) ||
-      (p.category || '').toLowerCase().includes(q) ||
-      (p.barcode || '').toLowerCase().includes(q)
-    );
-  });
+      // 2. In Stock Only
+      const inStock = (p.showroomQty || 0) > 0;
+      if (inStockOnly && !inStock) return false;
+
+      // 3. Price Bracket
+      const price = Number(p.retailPrice || 0);
+      if (priceBracket === 'under-10' && price >= 10) return false;
+      if (priceBracket === '10-20' && (price < 10 || price > 20)) return false;
+      if (priceBracket === '20-35' && (price < 20 || price > 35)) return false;
+      if (priceBracket === '35-plus' && price <= 35) return false;
+
+      // 4. Raw Category filter (if selected from drawer)
+      if (selectedRawCategory && selectedRawCategory !== 'All') {
+        if ((p.category || '').trim().toLowerCase() !== selectedRawCategory.toLowerCase()) return false;
+      }
+
+      // 5. Category Navigation filter (when not overriding with specific raw category)
+      if (activeCategory !== 'All' && (!selectedRawCategory || selectedRawCategory === 'All')) {
+        const primaryCat = getProductPrimaryCategory(p);
+        if (activeCategory === 'Other Products') {
+          if (primaryCat !== 'Other Products') return false;
+          if (activeSubCategory !== 'All') {
+            let pSub = (p.category || p.type || '').trim();
+            if (!pSub || pSub.toLowerCase() === 'other' || pSub.toLowerCase() === 'other products') {
+              pSub = 'General';
+            }
+            if (pSub.toLowerCase() !== activeSubCategory.toLowerCase()) return false;
+          }
+        } else {
+          if (primaryCat !== activeCategory) return false;
+        }
+      }
+
+      return true;
+    });
+
+    // 6. Sorting
+    return [...result].sort((a, b) => {
+      const priceA = Number(a.retailPrice || 0);
+      const priceB = Number(b.retailPrice || 0);
+      const stockA = (a.showroomQty || 0) > 0 ? 1 : 0;
+      const stockB = (b.showroomQty || 0) > 0 ? 1 : 0;
+      const nameA = (a.name || '').toLowerCase();
+      const nameB = (b.name || '').toLowerCase();
+
+      switch (sortBy) {
+        case 'price-asc':
+          return priceA - priceB;
+        case 'price-desc':
+          return priceB - priceA;
+        case 'name-asc':
+          return nameA.localeCompare(nameB);
+        case 'instock-first':
+          if (stockA !== stockB) return stockB - stockA;
+          return nameA.localeCompare(nameB);
+        default:
+          // featured: prioritize in-stock items, then name
+          if (stockA !== stockB) return stockB - stockA;
+          return 0;
+      }
+    });
+  }, [products, searchTerm, inStockOnly, priceBracket, selectedRawCategory, activeCategory, activeSubCategory, sortBy]);
 
   // Handle final WhatsApp Checkout
   const handleCompleteWhatsAppOrder = async (e) => {
@@ -503,18 +598,20 @@ export default function CustomerCatalog({ onGoToLogin }) {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           {[
-            { id: 'Perfume', title: 'Perfume', subtitle: 'Luxury Fragrance' },
-            { id: 'Hair', title: 'Hair', subtitle: 'Bundles & Care' },
-            { id: 'Body Lotion', title: 'Body Lotion', subtitle: 'Silky Moisture' },
-            { id: 'Body Oil', title: 'Body Oil', subtitle: 'Scented Glow' },
-            { id: 'Other Products', title: 'Other Products', subtitle: 'Explore All Categories' },
+            { id: 'Perfume', title: 'Perfume', subtitle: 'Luxury Fragrance & Sprays' },
+            { id: 'Skincare', title: 'Skincare', subtitle: 'Serums, Creams & Wash' },
+            { id: 'Body Lotion', title: 'Body Lotion', subtitle: 'Silky Daily Moisture' },
+            { id: 'Body Care', title: 'Body Care', subtitle: 'Oils, Washes & Soaps' },
+            { id: 'Hair', title: 'Hair Care', subtitle: 'Bundles & Treatments' },
+            { id: 'Wholesale Sets', title: 'Wholesale Sets', subtitle: 'Package Packs & Bundles' },
           ].map(cat => (
             <button
               key={cat.id}
               onClick={() => {
                 setActiveCategory(cat.id);
+                setSelectedRawCategory('All');
                 setActiveSubCategory('All');
                 scrollToCatalog();
               }}
@@ -542,24 +639,169 @@ export default function CustomerCatalog({ onGoToLogin }) {
       {/* 5. LIVE PRODUCTS CATALOG GRID WITH "ADD TO BAG" */}
       <section id="catalog-grid" className="max-w-7xl mx-auto px-4 sm:px-8 py-8 w-full flex-1">
         
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eee7de] pb-4 mb-6">
+        {/* Title & Stats */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eee7de] pb-4 mb-4">
           <div>
-            <h4 className="font-serif text-xl text-stone-900">
-              {activeCategory === 'All'
-                ? 'All Beauty Essentials'
-                : activeCategory === 'Other Products'
-                  ? (activeSubCategory === 'All' ? 'Other Products' : `Other Products · ${activeSubCategory}`)
-                  : activeCategory}
+            <h4 className="font-serif text-xl sm:text-2xl text-stone-900">
+              {selectedRawCategory !== 'All'
+                ? selectedRawCategory
+                : activeCategory === 'All'
+                  ? 'All Beauty Essentials'
+                  : activeCategory === 'Other Products'
+                    ? (activeSubCategory === 'All' ? 'Other Products' : `Other Products · ${activeSubCategory}`)
+                    : activeCategory}
             </h4>
             <p className="text-xs text-stone-500 mt-0.5">
-              {filtered.length} product{filtered.length !== 1 ? 's' : ''} available · Exchange Rate: 1 USD = {exchangeRate} LRD
+              Showing <span className="font-semibold text-stone-800">{filtered.length}</span> product{filtered.length !== 1 ? 's' : ''} · Exchange Rate: 1 USD = {exchangeRate} LRD
             </p>
           </div>
 
-          {searchTerm && (
-            <div className="inline-flex items-center gap-1.5 bg-[#efaa9b]/20 border border-[#efaa9b]/40 px-3 py-1 rounded-full text-xs text-[#45150b]">
-              <span>Results for "{searchTerm}"</span>
-              <button onClick={() => setSearchTerm('')}><X className="w-3 h-3" /></button>
+          <div className="flex items-center gap-2">
+            {activeFiltersCount > 0 && (
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="text-xs font-semibold text-[#8c655d] hover:text-[#45150b] flex items-center gap-1 transition-colors"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Reset ({activeFiltersCount})</span>
+              </button>
+            )}
+
+            {/* Mobile & Desktop Drawer Trigger */}
+            <button
+              type="button"
+              onClick={() => setIsFilterDrawerOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#45150b] text-white hover:bg-[#340f07] rounded-full text-xs font-bold transition-all shadow-sm active:scale-95"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-[#efaa9b]" />
+              <span>All Filters</span>
+              {activeFiltersCount > 0 && (
+                <span className="w-4 h-4 bg-[#efaa9b] text-[#45150b] text-[10px] font-extrabold rounded-full flex items-center justify-center ml-0.5">
+                  {activeFiltersCount}
+                </span>
+              )}
+            </button>
+          </div>
+        </div>
+
+        {/* Interactive Filter & Sort Toolbar */}
+        <div className="bg-white border border-[#ede6dc] rounded-2xl p-3 sm:p-4 shadow-xs mb-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            
+            {/* Left: Quick In-Stock Switch */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setInStockOnly(prev => !prev)}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all flex items-center gap-1.5 border ${
+                  inStockOnly
+                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                    : 'bg-stone-50 hover:bg-stone-100 text-stone-700 border-stone-300'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${inStockOnly ? 'bg-white' : 'bg-emerald-500'}`} />
+                <span>In Stock Only</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${inStockOnly ? 'bg-emerald-700 text-white' : 'bg-stone-200 text-stone-600'}`}>
+                  {inStockCount}
+                </span>
+              </button>
+            </div>
+
+            {/* Right: Sort By Selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-stone-400 font-medium hidden sm:inline flex items-center gap-1">
+                <ArrowUpDown className="w-3 h-3 text-stone-400" />
+                <span>Sort:</span>
+              </span>
+              <select
+                value={sortBy}
+                onChange={e => setSortBy(e.target.value)}
+                className="bg-stone-50 hover:bg-stone-100 border border-stone-300 rounded-full px-3 py-1.5 text-xs text-stone-800 font-medium focus:outline-none focus:border-[#df9487] transition-all cursor-pointer"
+              >
+                <option value="featured">Featured / Recommended</option>
+                <option value="instock-first">In Stock First</option>
+                <option value="price-asc">Price: Low to High</option>
+                <option value="price-desc">Price: High to Low</option>
+                <option value="name-asc">Name: A to Z</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Price Range Quick Chips */}
+          <div className="pt-2 border-t border-stone-100 flex items-center gap-1.5 overflow-x-auto no-scrollbar scrollbar-none">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-stone-400 mr-1 flex-shrink-0">
+              Price:
+            </span>
+            {[
+              { id: 'all', label: 'All Prices' },
+              { id: 'under-10', label: 'Under $10' },
+              { id: '10-20', label: '$10 – $20' },
+              { id: '20-35', label: '$20 – $35' },
+              { id: '35-plus', label: '$35+' },
+            ].map(p => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setPriceBracket(p.id)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all flex-shrink-0 ${
+                  priceBracket === p.id
+                    ? 'bg-[#df9487] text-white shadow-xs'
+                    : 'bg-stone-100 text-stone-600 hover:bg-stone-200 border border-transparent'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Active Filter Tags */}
+          {(activeFiltersCount > 0 || searchTerm) && (
+            <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="text-[11px] text-stone-400 font-semibold mr-1">Active:</span>
+
+              {searchTerm && (
+                <span className="inline-flex items-center gap-1 bg-[#efaa9b]/25 text-[#45150b] px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                  Search: "{searchTerm}"
+                  <button onClick={() => setSearchTerm('')}><X className="w-3 h-3 hover:text-black" /></button>
+                </span>
+              )}
+
+              {inStockOnly && (
+                <span className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                  In Stock Only
+                  <button onClick={() => setInStockOnly(false)}><X className="w-3 h-3 hover:text-black" /></button>
+                </span>
+              )}
+
+              {priceBracket !== 'all' && (
+                <span className="inline-flex items-center gap-1 bg-[#efaa9b]/25 text-[#45150b] px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                  Price: {priceBracket === 'under-10' ? 'Under $10' : priceBracket === '10-20' ? '$10 – $20' : priceBracket === '20-35' ? '$20 – $35' : '$35+'}
+                  <button onClick={() => setPriceBracket('all')}><X className="w-3 h-3 hover:text-black" /></button>
+                </span>
+              )}
+
+              {selectedRawCategory !== 'All' && (
+                <span className="inline-flex items-center gap-1 bg-[#45150b] text-white px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                  Category: {selectedRawCategory}
+                  <button onClick={() => setSelectedRawCategory('All')}><X className="w-3 h-3 hover:text-[#efaa9b]" /></button>
+                </span>
+              )}
+
+              {sortBy !== 'featured' && (
+                <span className="inline-flex items-center gap-1 bg-stone-200 text-stone-700 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                  Sort: {sortBy === 'price-asc' ? 'Low to High' : sortBy === 'price-desc' ? 'High to Low' : sortBy === 'name-asc' ? 'A to Z' : 'In Stock'}
+                  <button onClick={() => setSortBy('featured')}><X className="w-3 h-3 hover:text-black" /></button>
+                </span>
+              )}
+
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="text-[11px] text-[#8c655d] hover:text-[#45150b] underline font-semibold ml-1 cursor-pointer"
+              >
+                Clear all
+              </button>
             </div>
           )}
         </div>
@@ -717,12 +959,20 @@ export default function CustomerCatalog({ onGoToLogin }) {
             })}
           </div>
         ) : (
-          <div className="text-center py-20 bg-white rounded-2xl border border-[#eee7de] p-8 space-y-2">
+          <div className="text-center py-20 bg-white rounded-2xl border border-[#eee7de] p-8 space-y-3">
             <ShoppingBag className="w-10 h-10 text-stone-300 mx-auto" />
-            <h5 className="font-serif text-lg text-stone-800">No items found</h5>
-            <p className="text-xs text-stone-500">
-              We couldn't find any products in "{activeSubCategory !== 'All' ? activeSubCategory : activeCategory}". Try clearing your search.
+            <h5 className="font-serif text-lg text-stone-800">No products match your filters</h5>
+            <p className="text-xs text-stone-500 max-w-sm mx-auto">
+              We couldn't find any products matching your current filters and search criteria.
             </p>
+            <button
+              type="button"
+              onClick={clearAllFilters}
+              className="mt-2 inline-flex items-center gap-1.5 px-4 py-2 bg-[#df9487] hover:bg-[#d48476] text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-98 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset All Filters</span>
+            </button>
           </div>
         )}
       </section>
@@ -1006,6 +1256,210 @@ export default function CustomerCatalog({ onGoToLogin }) {
                   </form>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. MOBILE & DESKTOP FILTER SLIDE-OVER DRAWER */}
+      {isFilterDrawerOpen && (
+        <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsFilterDrawerOpen(false)}
+          />
+
+          <div className="relative w-full max-w-md bg-white h-full shadow-2xl flex flex-col z-10 animate-in slide-in-from-right duration-200">
+            {/* Header */}
+            <div className="px-5 py-4 border-b border-stone-200 flex items-center justify-between bg-[#faf8f5]">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-5 h-5 text-[#df9487]" />
+                <h3 className="font-serif text-lg font-bold text-stone-900">Filter & Sort</h3>
+                {activeFiltersCount > 0 && (
+                  <span className="text-xs bg-[#efaa9b]/30 text-[#45150b] px-2 py-0.5 rounded-full font-bold">
+                    {activeFiltersCount} active
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {activeFiltersCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearAllFilters}
+                    className="text-xs font-semibold text-[#8c655d] hover:text-[#45150b] underline mr-1"
+                  >
+                    Reset
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsFilterDrawerOpen(false)}
+                  className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 hover:bg-stone-200/60 transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Scrollable Filter Options */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-6">
+              
+              {/* 1. Stock Status */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-2.5">
+                  Stock Availability
+                </label>
+                <div
+                  onClick={() => setInStockOnly(v => !v)}
+                  className={`p-3.5 rounded-xl border cursor-pointer transition-all flex items-center justify-between ${
+                    inStockOnly
+                      ? 'bg-emerald-50 border-emerald-500 shadow-xs'
+                      : 'bg-stone-50 border-stone-200 hover:border-stone-300'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-3 h-3 rounded-full ${inStockOnly ? 'bg-emerald-500 ring-4 ring-emerald-200' : 'bg-stone-300'}`} />
+                    <div>
+                      <p className="text-xs font-bold text-stone-900">In Stock in Showroom</p>
+                      <p className="text-[10px] text-stone-500">Only items available for immediate pickup or delivery</p>
+                    </div>
+                  </div>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${inStockOnly ? 'bg-emerald-600 text-white' : 'bg-stone-200 text-stone-700'}`}>
+                    {inStockCount}
+                  </span>
+                </div>
+              </div>
+
+              {/* 2. Sort Options */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-2.5">
+                  Sort Products By
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'featured', label: 'Featured / Recommended' },
+                    { id: 'instock-first', label: 'In Stock First' },
+                    { id: 'price-asc', label: 'Price: Low to High' },
+                    { id: 'price-desc', label: 'Price: High to Low' },
+                    { id: 'name-asc', label: 'Name: A to Z' },
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setSortBy(opt.id)}
+                      className={`p-2.5 rounded-xl text-xs font-semibold text-left border transition-all ${
+                        sortBy === opt.id
+                          ? 'bg-[#45150b] text-white border-[#45150b] shadow-xs'
+                          : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-stone-300'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3. Price Range */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-stone-500 mb-2.5">
+                  Price Range
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    { id: 'all', label: 'All Prices' },
+                    { id: 'under-10', label: 'Under $10' },
+                    { id: '10-20', label: '$10 – $20' },
+                    { id: '20-35', label: '$20 – $35' },
+                    { id: '35-plus', label: '$35+' },
+                  ].map(p => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setPriceBracket(p.id)}
+                      className={`p-2.5 rounded-xl text-xs font-semibold text-center border transition-all ${
+                        priceBracket === p.id
+                          ? 'bg-[#df9487] text-white border-[#df9487] shadow-xs font-bold'
+                          : 'bg-stone-50 text-stone-700 border-stone-200 hover:border-stone-300'
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. Filter by Specific Inventory Category */}
+              <div>
+                <div className="flex items-center justify-between mb-2.5">
+                  <label className="block text-xs font-bold uppercase tracking-wider text-stone-500">
+                    Specific Category ({allRawCategories.length})
+                  </label>
+                  {selectedRawCategory !== 'All' && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedRawCategory('All')}
+                      className="text-[11px] text-[#8c655d] hover:text-[#45150b] underline font-semibold"
+                    >
+                      Show All
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 max-h-60 overflow-y-auto p-1 border border-stone-200 rounded-xl bg-stone-50">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedRawCategory('All')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      selectedRawCategory === 'All'
+                        ? 'bg-[#45150b] text-white shadow-xs'
+                        : 'bg-white text-stone-700 border border-stone-200 hover:border-stone-400'
+                    }`}
+                  >
+                    All ({products.length})
+                  </button>
+                  {allRawCategories.map(cat => (
+                    <button
+                      key={cat.name}
+                      type="button"
+                      onClick={() => setSelectedRawCategory(cat.name)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+                        selectedRawCategory === cat.name
+                          ? 'bg-[#45150b] text-white shadow-xs font-bold'
+                          : 'bg-white text-stone-700 border border-stone-200 hover:border-stone-400'
+                      }`}
+                    >
+                      <span>{cat.name}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        selectedRawCategory === cat.name ? 'bg-white/20 text-white' : 'bg-stone-100 text-stone-500'
+                      }`}>
+                        {cat.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+            </div>
+
+            {/* Sticky Bottom Actions */}
+            <div className="p-4 border-t border-stone-200 bg-[#faf8f5] flex items-center gap-3">
+              <button
+                type="button"
+                onClick={clearAllFilters}
+                className="w-1/3 py-3 px-3 border border-stone-300 hover:border-stone-400 text-stone-700 rounded-xl text-xs font-bold transition-all text-center"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFilterDrawerOpen(false);
+                  scrollToCatalog();
+                }}
+                className="w-2/3 py-3 px-4 bg-[#df9487] hover:bg-[#d48476] text-white rounded-xl text-xs font-bold uppercase tracking-wider transition-all shadow-md shadow-[#df9487]/30 text-center active:scale-98"
+              >
+                Show {filtered.length} Product{filtered.length !== 1 ? 's' : ''}
+              </button>
             </div>
           </div>
         </div>
