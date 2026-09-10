@@ -4,6 +4,7 @@ import {
   onSnapshot, 
   doc, 
   updateDoc, 
+  increment,
   serverTimestamp, 
   addDoc 
 } from 'firebase/firestore';
@@ -11,6 +12,7 @@ import { db } from '../../firebase/config';
 import { useCurrency } from '../../hooks/useCurrency';
 import SupplierModal from './SupplierModal';
 import RestockOrderModal from './RestockOrderModal';
+import Modal from '../shared/Modal';
 import {
   Truck,
   Package,
@@ -26,13 +28,30 @@ import {
   Mail,
   AlertTriangle,
   CheckCircle,
+  CheckCircle2,
   FileSpreadsheet,
   Boxes,
   ArrowRight,
   ExternalLink,
   ChevronRight,
-  ClipboardList
+  ClipboardList,
+  Ship,
+  Globe,
+  Eye,
+  Camera,
+  FileText,
+  X
 } from 'lucide-react';
+
+function getSupplierOrigin(supplier) {
+  const text = `${supplier.address || ''} ${supplier.notes || ''} ${supplier.name || ''}`.toLowerCase();
+  if (text.includes('china') || text.includes('guangzhou') || text.includes('yiwu')) return { flag: '🇨🇳', name: 'China', transit: '3-5 wks' };
+  if (text.includes('dubai') || text.includes('uae')) return { flag: '🇦🇪', name: 'Dubai', transit: '3-5 wks' };
+  if (text.includes('nigeria') || text.includes('lagos')) return { flag: '🇳🇬', name: 'Nigeria', transit: '1-2 wks' };
+  if (text.includes('ghana') || text.includes('accra')) return { flag: '🇬🇭', name: 'Ghana', transit: '1-2 wks' };
+  if (text.includes('ivory') || text.includes('abidjan') || text.includes('côte')) return { flag: '🇨🇮', name: 'Ivory Coast', transit: '1-2 wks' };
+  return { flag: '🌐', name: 'International', transit: '2-4 wks' };
+}
 
 export default function SuppliersView() {
   const { format } = useCurrency();
@@ -57,6 +76,40 @@ export default function SuppliersView() {
   const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
   const [selectedSupplierForRestock, setSelectedSupplierForRestock] = useState(null);
   const [prefilledRestockItems, setPrefilledRestockItems] = useState([]);
+
+  // Orders pipeline & Receipt Viewer state
+  const [orderFilter, setOrderFilter] = useState('all'); // 'all' | 'in_transit' | 'received'
+  const [viewReceiptModal, setViewReceiptModal] = useState(null);
+  const [receivingOrderId, setReceivingOrderId] = useState(null);
+
+  // 1-Click Receive Shipment into Monrovia Storeroom
+  const handleReceiveOrder = async (order) => {
+    if (!window.confirm(`Confirm Monrovia store arrival for ${order.poNumber}?\n\nThis will increment ${order.totalUnits || 0} units directly into your Storeroom inventory.`)) {
+      return;
+    }
+    setReceivingOrderId(order.id);
+    try {
+      for (const it of (order.items || [])) {
+        if (it.productId) {
+          await updateDoc(doc(db, 'products', it.productId), {
+            storeroomQty: increment(it.orderQty || 0),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      }
+      await updateDoc(doc(db, 'restockOrders', order.id), {
+        status: 'received',
+        receivedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      alert(`Order ${order.poNumber} successfully received into Storeroom!`);
+    } catch (err) {
+      console.error('Error receiving order:', err);
+      alert('Failed to receive order: ' + err.message);
+    } finally {
+      setReceivingOrderId(null);
+    }
+  };
 
   // CSV Import file input ref
   const fileInputRef = useRef(null);
@@ -525,15 +578,24 @@ export default function SuppliersView() {
                     filteredSuppliers.map((supplier) => {
                       const isActive = supplier.active !== false;
                       const itemCount = supplierProductCountMap[supplier.id] || 0;
+                      const origin = getSupplierOrigin(supplier);
 
                       return (
                         <tr key={supplier.id} className="hover:bg-slate-800/40 transition-colors">
-                          {/* Supplier Name & Code */}
+                          {/* Supplier Name & Origin Flag */}
                           <td className="px-4 py-3 text-white font-medium">
-                            <div className="font-semibold text-white">{supplier.name}</div>
-                            <div className="text-[11px] text-slate-400 font-mono">{supplier.code || '—'}</div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-base flex-shrink-0" title={origin.name}>{origin.flag}</span>
+                              <span className="font-semibold text-white truncate max-w-xs">{supplier.name}</span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] text-slate-400 font-mono">{supplier.code || '—'}</span>
+                              <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 font-medium border border-slate-700">
+                                {origin.name} · {origin.transit}
+                              </span>
+                            </div>
                             {supplier.address && (
-                              <div className="text-[10px] text-slate-500 truncate max-w-xs">{supplier.address}</div>
+                              <div className="text-[10px] text-slate-500 truncate max-w-xs mt-0.5">{supplier.address}</div>
                             )}
                           </td>
 
@@ -568,7 +630,7 @@ export default function SuppliersView() {
 
                           {/* Lead Time */}
                           <td className="px-4 py-3 text-slate-300">
-                            {supplier.leadTimeDays ? `${supplier.leadTimeDays} days` : '—'}
+                            {supplier.leadTimeDays ? `${supplier.leadTimeDays} days` : origin.transit}
                           </td>
 
                           {/* Linked Items */}
@@ -595,10 +657,10 @@ export default function SuppliersView() {
                             </button>
                           </td>
 
-                          {/* Actions */}
+                          {/* Actions: 1-Click Restock */}
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
-                              {/* Create Restock Order for this supplier */}
+                              {/* 1-Click Fast Restock Button */}
                               <button
                                 type="button"
                                 onClick={() => {
@@ -606,10 +668,11 @@ export default function SuppliersView() {
                                   setPrefilledRestockItems([]);
                                   setIsRestockModalOpen(true);
                                 }}
-                                title="Order Restock from Supplier"
-                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-rose-400 hover:text-white rounded-lg transition-colors"
+                                title="Order Restock from this Supplier"
+                                className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-500 hover:bg-rose-400 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
                               >
                                 <Boxes className="w-3.5 h-3.5" />
+                                <span>⚡ Restock</span>
                               </button>
 
                               {/* Edit Supplier */}
@@ -750,79 +813,256 @@ export default function SuppliersView() {
         </div>
       )}
 
-      {/* VIEW 3: PURCHASE ORDERS LOG */}
-      {viewTab === 'orders' && (
-        <div className="space-y-3">
-          <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4">
-            <h2 className="text-base font-bold text-white">Purchase & Restock Orders History</h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Record of all placed restock purchase orders and stock receipts into storeroom.
-            </p>
-          </div>
+      {/* VIEW 3: PURCHASE ORDERS & OVERSEAS LOGISTICS PIPELINE */}
+      {viewTab === 'orders' && (() => {
+        const inTransitList = restockOrders.filter(o => o.status === 'in_transit');
+        const receivedList = restockOrders.filter(o => o.status === 'received');
+        const filteredOrders = orderFilter === 'in_transit' 
+          ? inTransitList 
+          : orderFilter === 'received' 
+            ? receivedList 
+            : restockOrders;
 
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-800/80 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800">
-                  <tr>
-                    <th className="px-4 py-3">PO Number</th>
-                    <th className="px-4 py-3">Supplier</th>
-                    <th className="px-4 py-3 text-center">Items / Units</th>
-                    <th className="px-4 py-3 text-right">Total Est. Cost</th>
-                    <th className="px-4 py-3 text-center">Status</th>
-                    <th className="px-4 py-3 text-right">Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {restockOrders.length === 0 ? (
+        return (
+          <div className="space-y-3">
+            <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-white flex items-center gap-2">
+                  <Ship className="w-5 h-5 text-rose-400" />
+                  International Logistics & Restock Orders
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Track overseas shipments in transit from Dubai, China, Nigeria, Ghana, and Ivory Coast. Receive into storeroom upon Monrovia delivery.
+                </p>
+              </div>
+
+              {/* Order Status Filters */}
+              <div className="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter('all')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${
+                    orderFilter === 'all'
+                      ? 'bg-slate-700 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  All ({restockOrders.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter('in_transit')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                    orderFilter === 'in_transit'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Ship className="w-3.5 h-3.5 text-amber-400" />
+                  <span>In Transit ({inTransitList.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOrderFilter('received')}
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                    orderFilter === 'received'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Received ({receivedList.length})</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-800/80 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800">
                     <tr>
-                      <td colSpan={6} className="px-4 py-10 text-center text-slate-500">
-                        No purchase restock orders recorded yet.
-                      </td>
+                      <th className="px-4 py-3">PO & Origin Hub</th>
+                      <th className="px-4 py-3">Supplier</th>
+                      <th className="px-4 py-3 text-center">Items / Units</th>
+                      <th className="px-4 py-3 text-right">Total Outflow</th>
+                      <th className="px-4 py-3 text-center">Payment & Slip</th>
+                      <th className="px-4 py-3 text-center">Transit Status</th>
+                      <th className="px-4 py-3 text-right">Monrovia Receiving</th>
                     </tr>
-                  ) : (
-                    restockOrders.map(order => {
-                      const dateStr = order.createdAt?.seconds
-                        ? new Date(order.createdAt.seconds * 1000).toLocaleDateString()
-                        : 'Recent';
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {filteredOrders.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
+                          {orderFilter === 'in_transit' 
+                            ? 'No overseas shipments currently in transit.' 
+                            : 'No restock orders found.'}
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredOrders.map(order => {
+                        const dateStr = order.createdAt?.seconds
+                          ? new Date(order.createdAt.seconds * 1000).toLocaleDateString()
+                          : 'Recent';
 
-                      const isReceived = order.status === 'received';
+                        const isInTransit = order.status === 'in_transit';
+                        const isReceived = order.status === 'received';
 
-                      return (
-                        <tr key={order.id} className="hover:bg-slate-800/40">
-                          <td className="px-4 py-3 text-white font-mono font-bold">
-                            {order.poNumber || order.id.slice(0, 8)}
-                          </td>
-                          <td className="px-4 py-3 text-white font-medium">
-                            {order.supplierName || 'General Supplier'}
-                          </td>
-                          <td className="px-4 py-3 text-center text-slate-300">
-                            {order.totalItemsCount || (order.items?.length || 0)} items ({order.totalUnits || 0} pcs)
-                          </td>
-                          <td className="px-4 py-3 text-right text-emerald-400 font-semibold">
-                            {format(order.totalCost || 0)}
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${
-                              isReceived
-                                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                            }`}>
-                              {order.status || 'Pending'}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-right text-slate-400">
-                            {dateStr}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                        return (
+                          <tr key={order.id} className="hover:bg-slate-800/40 transition-colors">
+                            {/* PO Number & Origin Hub */}
+                            <td className="px-4 py-3 text-white">
+                              <div className="font-mono font-bold text-white flex items-center gap-1.5">
+                                <span>{order.originFlag || '🌐'}</span>
+                                <span>{order.poNumber || order.id.slice(0, 8)}</span>
+                              </div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">
+                                {order.originHub || 'Overseas Trade Hub'} · {dateStr}
+                              </div>
+                            </td>
+
+                            {/* Supplier Name */}
+                            <td className="px-4 py-3 text-white font-medium">
+                              <div className="font-semibold text-white">{order.supplierName || 'General Supplier'}</div>
+                              {order.expectedLeadTime && (
+                                <div className="text-[10px] text-slate-400">Est. Lead: {order.expectedLeadTime}</div>
+                              )}
+                            </td>
+
+                            {/* Items / Units Count */}
+                            <td className="px-4 py-3 text-center text-slate-300">
+                              <span className="font-semibold text-white">
+                                {order.totalUnits || 0} units
+                              </span>
+                              <div className="text-[10px] text-slate-400">
+                                {order.totalItemsCount || (order.items?.length || 0)} products
+                              </div>
+                            </td>
+
+                            {/* Total Outflow */}
+                            <td className="px-4 py-3 text-right">
+                              <span className="text-emerald-400 font-bold font-mono">
+                                {format(order.totalCost || 0)}
+                              </span>
+                              {order.freightCost > 0 && (
+                                <div className="text-[10px] text-slate-400">
+                                  incl. {format(order.freightCost)} freight
+                                </div>
+                              )}
+                            </td>
+
+                            {/* Payment Method & Slip */}
+                            <td className="px-4 py-3 text-center">
+                              <div className="inline-flex flex-col items-center gap-1">
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 font-mono">
+                                  {order.paymentSource === 'cash_drawer' ? '💵 Cash Drawer' :
+                                   order.paymentSource === 'momo' ? '📱 MoMo' :
+                                   order.paymentSource === 'bank_transfer' ? '🏦 Bank Wire' : '⏳ Credit / COD'}
+                                </span>
+                                {order.receiptImage && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setViewReceiptModal(order)}
+                                    className="text-[10px] text-rose-400 hover:text-rose-300 flex items-center gap-1 font-semibold"
+                                  >
+                                    <Camera className="w-3 h-3" /> View Slip
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* Status Badge */}
+                            <td className="px-4 py-3 text-center">
+                              {isInTransit ? (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                  <Ship className="w-3 h-3 animate-pulse" />
+                                  <span>In Transit</span>
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                                  <CheckCircle2 className="w-3 h-3" />
+                                  <span>Received</span>
+                                </span>
+                              )}
+                            </td>
+
+                            {/* Monrovia Receiving Action */}
+                            <td className="px-4 py-3 text-right">
+                              {isInTransit ? (
+                                <button
+                                  type="button"
+                                  disabled={receivingOrderId === order.id}
+                                  onClick={() => handleReceiveOrder(order)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95 cursor-pointer"
+                                  title="Confirm delivery to Monrovia store and increment storeroom inventory"
+                                >
+                                  <Package className="w-3.5 h-3.5" />
+                                  <span>{receivingOrderId === order.id ? 'Receiving...' : 'Receive into Storeroom'}</span>
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-slate-400">
+                                  {order.receivedAt?.seconds 
+                                    ? `Landed ${new Date(order.receivedAt.seconds * 1000).toLocaleDateString()}`
+                                    : 'Landed in Storeroom'}
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-        </div>
+        );
+      })()}
+
+      {/* Receipt Preview Lightbox Modal */}
+      {viewReceiptModal && (
+        <Modal
+          isOpen={true}
+          onClose={() => setViewReceiptModal(null)}
+          title={`Proof of Payment: ${viewReceiptModal.poNumber || 'Restock Order'}`}
+        >
+          <div className="space-y-3 text-xs text-slate-300">
+            <div className="flex justify-between items-center bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+              <div>
+                <span className="text-slate-400">Paid To:</span>{' '}
+                <strong className="text-white">{viewReceiptModal.supplierName}</strong>
+              </div>
+              <div>
+                <span className="text-slate-400">Amount:</span>{' '}
+                <strong className="text-emerald-400 font-mono text-sm">
+                  {format(viewReceiptModal.totalCost || 0)}
+                </strong>
+              </div>
+            </div>
+
+            {viewReceiptModal.receiptImage ? (
+              <div className="border border-slate-700 rounded-xl overflow-hidden bg-black/40 flex items-center justify-center p-2">
+                <img
+                  src={viewReceiptModal.receiptImage}
+                  alt="Receipt"
+                  className="max-h-[60vh] w-auto max-w-full rounded object-contain shadow-lg"
+                />
+              </div>
+            ) : (
+              <p className="text-slate-500 text-center py-6">No receipt image attached to this order.</p>
+            )}
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setViewReceiptModal(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold"
+              >
+                Close Receipt
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Supplier Create / Edit Modal */}

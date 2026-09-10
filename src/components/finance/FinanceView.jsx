@@ -15,14 +15,29 @@ import PaymentPieChart from './PaymentPieChart';
 import TopProducts from './TopProducts';
 import SalesImport from './SalesImport';
 import DetailedStoreReport from './DetailedStoreReport';
-import { BarChart2, List, CreditCard, Upload, Download, Sparkles } from 'lucide-react';
+import Modal from '../shared/Modal';
+import { 
+  BarChart2, 
+  List, 
+  CreditCard, 
+  Upload, 
+  Download, 
+  Sparkles,
+  Camera,
+  ShieldAlert,
+  ShieldCheck,
+  Eye,
+  Ship,
+  Boxes,
+  CheckCircle2
+} from 'lucide-react';
 import { downloadCSV } from '../../utils/exportCsv';
 
 const TABS = [
   { id: 'detailed', label: 'Store Deep Report', icon: Sparkles },
   { id: 'overview', label: 'Ledger & Inflows',  icon: List },
   { id: 'charts',   label: 'Visual Charts',     icon: BarChart2 },
-  { id: 'expenses', label: 'Expenses',          icon: CreditCard },
+  { id: 'expenses', label: 'Expenses & Restocks', icon: CreditCard },
   { id: 'import',   label: 'Import Sales',      icon: Upload },
 ];
 
@@ -37,6 +52,10 @@ export default function FinanceView() {
   const [rawExpenses, setRawExpenses] = useState([]);
   const [rawDeliveries, setRawDeliveries] = useState([]);
   const [activeTab, setActiveTab] = useState('detailed');
+
+  // Expense sub-filter & Receipt Lightbox
+  const [expenseSubFilter, setExpenseSubFilter] = useState('all'); // 'all' | 'restock' | 'overhead' | 'missing_receipt'
+  const [inspectedReceipt, setInspectedReceipt] = useState(null);
 
   // Step backward or forward in time
   const stepDate = (offset) => {
@@ -96,7 +115,7 @@ export default function FinanceView() {
   const grossRevenue = posSalesTotal + deliveryIncome;
   const totalExpenses = expenses.reduce((s, e) => s + (e.amount || 0), 0);
 
-  // Exact Physical Drawer Cash Calculations
+  // Exact Physical Drawer Cash Calculations (Only Cash Drawer payouts affect register cash)
   const cashSales = sales
     .filter(s => (s.paymentMethod || 'Cash').toLowerCase() === 'cash')
     .reduce((s, sale) => s + (sale.total || 0), 0);
@@ -105,7 +124,15 @@ export default function FinanceView() {
     .filter(d => (d.paymentStatus === 'Paid' || d.cashConfirmed) && (d.paymentStatus === 'COD' || d.paymentStatus === 'Paid'))
     .reduce((s, d) => s + (d.charge || 0), 0);
 
-  const expectedDrawerCash = (cashSales + cashDeliveries) - totalExpenses;
+  const drawerCashExpenses = expenses
+    .filter(e => !e.paymentMethod || e.paymentMethod === 'cash_drawer' || e.paymentMethod === 'Cash')
+    .reduce((s, e) => s + (e.amount || 0), 0);
+
+  const electronicExpenses = expenses
+    .filter(e => e.paymentMethod && e.paymentMethod !== 'cash_drawer' && e.paymentMethod !== 'Cash')
+    .reduce((s, e) => s + (e.amount || 0), 0);
+
+  const expectedDrawerCash = (cashSales + cashDeliveries) - drawerCashExpenses;
 
   const handleExportExpensesCSV = () => {
     const data = expenses.map(e => {
@@ -267,61 +294,184 @@ export default function FinanceView() {
         </div>
       )}
 
-      {/* 7. Tab 4: Expenses Tab */}
-      {activeTab === 'expenses' && (
-        <div className="space-y-4">
-          <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="font-medium text-white flex items-center gap-2">
-                <CreditCard className="w-4 h-4 text-rose-400" /> Log Outflow / Expense
-              </h3>
-              {expenses.length > 0 && (
+      {/* 7. Tab 4: Expenses & Restock Outflows Tab */}
+      {activeTab === 'expenses' && (() => {
+        const restockExpenses = expenses.filter(e => e.isRestockPayment || (e.category || '').toLowerCase().includes('restock') || (e.category || '').toLowerCase().includes('suppl'));
+        const overheadExpenses = expenses.filter(e => !restockExpenses.some(r => r.id === e.id));
+        const missingReceiptExpenses = expenses.filter(e => (Number(e.amount) >= 50) && !e.receiptImage);
+
+        const filteredExpenses = expenseSubFilter === 'restock' 
+          ? restockExpenses 
+          : expenseSubFilter === 'overhead' 
+            ? overheadExpenses 
+            : expenseSubFilter === 'missing_receipt' 
+              ? missingReceiptExpenses 
+              : expenses;
+
+        return (
+          <div className="space-y-4">
+            <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-white flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-rose-400" /> Log Outflow / Expense
+                </h3>
+                {expenses.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleExportExpensesCSV}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-[#efaa9b]/60 text-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#efaa9b]" />
+                    <span>Export Expenses (CSV)</span>
+                  </button>
+                )}
+              </div>
+              <ExpenseForm />
+            </div>
+
+            {/* Outflows Filter Pills */}
+            <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/80 p-3 rounded-2xl border border-slate-800">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
-                  onClick={handleExportExpensesCSV}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 border border-slate-600 hover:border-[#efaa9b]/60 text-slate-200 rounded-xl text-xs font-semibold transition-colors"
+                  onClick={() => setExpenseSubFilter('all')}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold transition-colors ${
+                    expenseSubFilter === 'all'
+                      ? 'bg-slate-700 text-white shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
                 >
-                  <Download className="w-3.5 h-3.5 text-[#efaa9b]" />
-                  <span>Export Expenses (CSV)</span>
+                  All Outflows ({expenses.length})
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setExpenseSubFilter('restock')}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                    expenseSubFilter === 'restock'
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Boxes className="w-3.5 h-3.5 text-rose-400" />
+                  <span>📦 Supplier Restocks ({restockExpenses.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExpenseSubFilter('overhead')}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                    expenseSubFilter === 'overhead'
+                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <span>🏢 Store Overhead ({overheadExpenses.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExpenseSubFilter('missing_receipt')}
+                  className={`px-3 py-1 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors ${
+                    expenseSubFilter === 'missing_receipt'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+                  <span>⚠️ Missing Receipts (≥$50) ({missingReceiptExpenses.length})</span>
+                </button>
+              </div>
+
+              <div className="text-xs text-slate-400">
+                Filtered Total: <strong className="text-white">${filteredExpenses.reduce((s, e) => s + (e.amount || 0), 0).toFixed(2)}</strong>
+              </div>
             </div>
-            <ExpenseForm />
-          </div>
-          {expenses.length > 0 && (
-            <div className="overflow-x-auto rounded-2xl border border-slate-700">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-slate-800 text-slate-400">
-                    <th className="text-left px-3 py-2">Time</th>
-                    <th className="text-left px-3 py-2">Category</th>
-                    <th className="text-left px-3 py-2">Recipient</th>
-                    <th className="text-left px-3 py-2">Auth By</th>
-                    <th className="text-right px-3 py-2">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expenses.map(e => (
-                    <tr key={e.id} className="border-t border-slate-800 hover:bg-slate-800/50">
-                      <td className="px-3 py-2 text-slate-400">
-                        {e.timestamp?.toDate?.() ? e.timestamp.toDate().toLocaleString() : '—'}
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="bg-slate-700 px-1.5 py-0.5 rounded text-slate-300">{e.category}</span>
-                      </td>
-                      <td className="px-3 py-2 text-slate-300">{e.recipient || '—'}</td>
-                      <td className="px-3 py-2 text-slate-400">{e.authorizedBy || '—'}</td>
-                      <td className="px-3 py-2 text-right font-semibold text-red-400">
-                        ${Number(e.amount).toFixed(2)}
-                      </td>
+
+            {/* Expenses Table */}
+            {expenses.length > 0 && (
+              <div className="overflow-x-auto rounded-2xl border border-slate-700 bg-slate-900/60">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="bg-slate-800 text-slate-400 border-b border-slate-700">
+                      <th className="text-left px-3 py-2.5">Date & Time</th>
+                      <th className="text-left px-3 py-2.5">Category</th>
+                      <th className="text-left px-3 py-2.5">Recipient / Description</th>
+                      <th className="text-center px-3 py-2.5">Funding Source</th>
+                      <th className="text-left px-3 py-2.5">Auth By</th>
+                      <th className="text-right px-3 py-2.5">Amount</th>
+                      <th className="text-center px-3 py-2.5">Proof of Payment</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-800">
+                    {filteredExpenses.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                          No expenses matching this category.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredExpenses.map(e => {
+                        const amt = Number(e.amount) || 0;
+                        const isHigh = amt >= 50;
+                        const hasReceipt = !!e.receiptImage;
+
+                        return (
+                          <tr key={e.id} className="hover:bg-slate-800/50 transition-colors">
+                            <td className="px-3 py-2 text-slate-400 whitespace-nowrap">
+                              {e.timestamp?.toDate?.() ? e.timestamp.toDate().toLocaleString() : '—'}
+                            </td>
+                            <td className="px-3 py-2">
+                              <span className={`px-2 py-0.5 rounded font-medium text-[11px] ${
+                                (e.category || '').includes('Restock') || (e.category || '').includes('Supplies')
+                                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                  : 'bg-slate-700 text-slate-300'
+                              }`}>
+                                {e.category}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-slate-200">
+                              <div className="font-medium text-white">{e.recipient || '—'}</div>
+                              {e.note && <div className="text-[10px] text-slate-400 truncate max-w-xs">{e.note}</div>}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              <span className="px-2 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-mono">
+                                {e.paymentMethod === 'cash_drawer' || e.paymentMethod === 'Cash' ? '💵 Cash Drawer' :
+                                 e.paymentMethod === 'momo' ? '📱 MoMo' :
+                                 e.paymentMethod === 'bank_transfer' ? '🏦 Bank Wire' : (e.paymentMethod || '💵 Cash')}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-slate-400">{e.authorizedBy || '—'}</td>
+                            <td className="px-3 py-2 text-right font-mono font-bold text-red-400">
+                              ${amt.toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {hasReceipt ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setInspectedReceipt(e)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded bg-emerald-950/40 hover:bg-emerald-950/70 text-emerald-300 border border-emerald-500/40 text-[11px] font-semibold transition-colors cursor-pointer"
+                                >
+                                  <Camera className="w-3 h-3 text-emerald-400" />
+                                  <span>View Slip</span>
+                                </button>
+                              ) : isHigh ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-500/40 text-[10px] font-bold">
+                                  <ShieldAlert className="w-3 h-3 text-amber-400" />
+                                  <span>Missing Receipt</span>
+                                </span>
+                              ) : (
+                                <span className="text-slate-600 text-[10px]">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* 8. Tab 5: Sales Spreadsheet Import Tab */}
       {activeTab === 'import' && (
@@ -333,6 +483,58 @@ export default function FinanceView() {
             }}
           />
         </div>
+      )}
+
+      {/* Receipt Preview Lightbox Modal */}
+      {inspectedReceipt && (
+        <Modal
+          isOpen={true}
+          onClose={() => setInspectedReceipt(null)}
+          title={`Proof of Payment: ${inspectedReceipt.category || 'Disbursement'}`}
+        >
+          <div className="space-y-3 text-xs text-slate-300">
+            <div className="flex justify-between items-center bg-slate-900 p-2.5 rounded-xl border border-slate-800">
+              <div>
+                <span className="text-slate-400">Recipient:</span>{' '}
+                <strong className="text-white">{inspectedReceipt.recipient || 'Vendor'}</strong>
+              </div>
+              <div>
+                <span className="text-slate-400">Amount:</span>{' '}
+                <strong className="text-rose-400 font-mono text-sm">
+                  ${Number(inspectedReceipt.amount).toFixed(2)}
+                </strong>
+              </div>
+            </div>
+
+            {inspectedReceipt.note && (
+              <p className="text-slate-400 italic bg-slate-900/50 p-2 rounded-lg">
+                "{inspectedReceipt.note}"
+              </p>
+            )}
+
+            {inspectedReceipt.receiptImage ? (
+              <div className="border border-slate-700 rounded-xl overflow-hidden bg-black/40 flex items-center justify-center p-2">
+                <img
+                  src={inspectedReceipt.receiptImage}
+                  alt="Receipt slip"
+                  className="max-h-[60vh] w-auto max-w-full rounded object-contain shadow-lg"
+                />
+              </div>
+            ) : (
+              <p className="text-slate-500 text-center py-6">No receipt image attached.</p>
+            )}
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setInspectedReceipt(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );

@@ -1,11 +1,26 @@
 import React, { useState, useRef } from 'react';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../hooks/useAuth';
 import { useApp } from '../../contexts/AppContext';
 import { useCurrency } from '../../hooks/useCurrency';
 import Modal from '../shared/Modal';
-import { Printer, CheckCircle, AlertTriangle, DollarSign, Calculator, FileText, ArrowRight, Bluetooth } from 'lucide-react';
+import { compressReceiptImage } from '../../utils/receiptCompressor';
+import { 
+  Printer, 
+  CheckCircle, 
+  AlertTriangle, 
+  DollarSign, 
+  Calculator, 
+  FileText, 
+  ArrowRight, 
+  Bluetooth,
+  ShieldAlert,
+  ShieldCheck,
+  Camera,
+  Upload,
+  Lock
+} from 'lucide-react';
 import { printToBluetoothThermalPrinter, buildZReportEscPos } from '../../utils/bluetoothPrinter';
 
 export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expenses = [] }) {
@@ -20,6 +35,11 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
+
+  // Financial Security Gatekeeper state
+  const [adminOverride, setAdminOverride] = useState(false);
+  const [overrideReason, setOverrideReason] = useState('');
+  const [uploadingReceiptFor, setUploadingReceiptFor] = useState(null);
 
   // Compute shift financial aggregates
   const todayStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -45,7 +65,23 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
   const creditSales = todaySales.filter(s => (s.paymentMethod || '').toLowerCase() === 'store credit' || s.isStoreCredit)
                                 .reduce((sum, s) => sum + (Number(s.total) || 0), 0);
 
-  const drawerExpensesUSD = todayExpenses.reduce((sum, e) => sum + (Number(e.amountUSD || e.amount) || 0), 0);
+  // Drawer Cash Expenses vs Non-Cash Expenses (Accurate Register Drawer Balance)
+  const drawerExpensesUSD = todayExpenses
+    .filter(e => !e.paymentMethod || e.paymentMethod === 'cash_drawer' || e.paymentMethod === 'Cash')
+    .reduce((sum, e) => sum + (Number(e.amountUSD || e.amount) || 0), 0);
+
+  const electronicExpensesUSD = todayExpenses
+    .filter(e => e.paymentMethod && e.paymentMethod !== 'cash_drawer' && e.paymentMethod !== 'Cash')
+    .reduce((sum, e) => sum + (Number(e.amountUSD || e.amount) || 0), 0);
+
+  // Financial Security Audit: Any expense >= $50 USD missing a receipt
+  const unverifiedHighValueExpenses = todayExpenses.filter(e => {
+    const amt = Number(e.amountUSD || e.amount) || 0;
+    return amt >= 50 && !e.receiptImage;
+  });
+
+  const hasUnverifiedExpenses = unverifiedHighValueExpenses.length > 0;
+  const isGatekeeperBlocking = hasUnverifiedExpenses && !adminOverride;
 
   const floatUSD = parseFloat(openingFloatUSD) || 0;
   const expectedCashUSD = floatUSD + cashSales - drawerExpensesUSD;
@@ -62,6 +98,27 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
   const isShort = varianceUSD < -0.05;
 
   const [btPrinting, setBtPrinting] = useState(false);
+
+  // Inline upload handler to attach missing receipt right inside the handover modal
+  const handleInlineReceiptUpload = async (expenseId, e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingReceiptFor(expenseId);
+    try {
+      const compressedDataUrl = await compressReceiptImage(file);
+      await updateDoc(doc(db, 'expenses', expenseId), {
+        receiptImage: compressedDataUrl,
+        hasReceipt: true,
+        status: 'verified',
+        verifiedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error('Failed to upload receipt:', err);
+      alert('Could not attach receipt: ' + err.message);
+    } finally {
+      setUploadingReceiptFor(null);
+    }
+  };
 
   const handlePrint = () => {
     const root = document.getElementById('receipt-print-root');
@@ -83,11 +140,11 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
         {
           cashierName: currentUser?.displayName || currentUser?.email || 'Staff',
           date: todayStr,
-          totalSales: todayGrossUSD,
+          totalSales: todayGrossSales,
           salesCount: todaySales.length,
-          cashSales: totalCashUSD,
-          momoSales: totalMoMoUSD,
-          cardSales: totalCardUSD,
+          cashSales,
+          momoSales,
+          cardSales,
           openingFloat: floatUSD,
           countedCash: totalCountedUSD,
           expectedCash: expectedCashUSD,
@@ -107,6 +164,11 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
   };
 
   const handleSaveHandover = async () => {
+    if (isGatekeeperBlocking) {
+      alert('Financial Security Gatekeeper: You cannot close this shift while there are unverified expenses of $50 or more. Please attach receipts or check Manager Override.');
+      return;
+    }
+
     if (!countedCashUSD && !countedCashLRD) {
       alert('Please enter the physical cash counted in the drawer (USD or LRD).');
       return;
@@ -125,6 +187,7 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
         cardSales,
         creditSales,
         drawerExpensesUSD,
+        electronicExpensesUSD,
         expectedCashUSD,
         countedCashUSD: actualUSD,
         countedCashLRD: actualLRD,
@@ -133,6 +196,9 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
         exchangeRate,
         notes,
         status: isBalanced ? 'balanced' : isOver ? 'over' : 'short',
+        adminOverrideUsed: hasUnverifiedExpenses && adminOverride,
+        overrideReason: adminOverride ? overrideReason : '',
+        unverifiedExpensesCount: unverifiedHighValueExpenses.length,
       });
       setSavedSuccess(true);
       setTimeout(() => {
@@ -245,6 +311,91 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
             <p className="text-[10px] text-slate-500">Salons on Account</p>
           </div>
         </div>
+
+        {/* Financial Security Gatekeeper Alert */}
+        {hasUnverifiedExpenses && (
+          <div className="bg-amber-950/40 border-2 border-amber-500/60 rounded-2xl p-4 text-amber-200 text-xs space-y-3">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-2 font-bold text-amber-300 text-sm">
+                <ShieldAlert className="w-5 h-5 text-amber-400 flex-shrink-0 animate-pulse" />
+                <span>Financial Security Gatekeeper: {unverifiedHighValueExpenses.length} Payout(s) ≥ $50 Missing Receipts</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-mono font-bold uppercase border border-amber-500/30">
+                Action Required
+              </span>
+            </div>
+
+            <p className="text-[11px] text-amber-200/90 leading-relaxed">
+              Store audit policy requires an attached receipt or slip for any disbursement of $50 USD or more before closing the register shift. Please attach the proof below or use Manager Override.
+            </p>
+
+            {/* List of unverified expenses with inline upload button */}
+            <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+              {unverifiedHighValueExpenses.map((exp) => (
+                <div key={exp.id} className="bg-slate-900/90 p-2.5 rounded-xl border border-amber-500/30 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-white text-xs">{exp.category || 'Expense'}</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">
+                        {exp.paymentMethod || 'cash_drawer'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                      To: <strong className="text-slate-200">{exp.recipient || 'N/A'}</strong> {exp.note ? `— ${exp.note}` : ''}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="font-mono font-bold text-sm text-rose-400">
+                      ${Number(exp.amount).toFixed(2)}
+                    </span>
+
+                    <label className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 rounded-lg text-[11px] font-bold cursor-pointer transition-colors active:scale-95">
+                      {uploadingReceiptFor === exp.id ? (
+                        <span>Attaching...</span>
+                      ) : (
+                        <>
+                          <Camera className="w-3.5 h-3.5 text-amber-400" />
+                          <span>📸 Snap / Upload</span>
+                        </>
+                      )}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        capture="environment"
+                        className="hidden"
+                        onChange={(e) => handleInlineReceiptUpload(exp.id, e)}
+                      />
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Manager Override option */}
+            <div className="pt-2 border-t border-amber-500/30 flex flex-wrap items-center justify-between gap-2">
+              <label className="flex items-center gap-2 text-[11px] text-amber-300 font-medium cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={adminOverride}
+                  onChange={e => setAdminOverride(e.target.checked)}
+                  className="rounded border-amber-600 text-amber-600 focus:ring-amber-500"
+                />
+                <span>Manager Override (Permit shift close without receipts; will be flagged in audit log)</span>
+              </label>
+
+              {adminOverride && (
+                <input
+                  type="text"
+                  value={overrideReason}
+                  onChange={e => setOverrideReason(e.target.value)}
+                  placeholder="Reason for missing receipt (e.g. wire pending from bank)"
+                  className="flex-1 min-w-[200px] bg-slate-900 border border-amber-500/40 rounded-lg px-2 py-1 text-[11px] text-white focus:outline-none"
+                />
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Cash Drawer Counting Inputs */}
         <div className="bg-slate-800/50 border border-slate-700/80 rounded-2xl p-4 space-y-3">
