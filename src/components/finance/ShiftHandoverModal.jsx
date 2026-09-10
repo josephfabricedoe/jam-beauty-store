@@ -15,13 +15,28 @@ import {
   FileText, 
   ArrowRight, 
   Bluetooth,
-  ShieldAlert,
-  ShieldCheck,
-  Camera,
-  Upload,
-  Lock
+  ShieldAlert, 
+  ShieldCheck, 
+  Camera, 
+  Upload, 
+  Lock,
+  Unlock,
+  CheckCircle2,
+  TrendingUp,
+  TrendingDown
 } from 'lucide-react';
 import { printToBluetoothThermalPrinter, buildZReportEscPos } from '../../utils/bluetoothPrinter';
+
+const COMMON_DISCREPANCY_REASONS = [
+  'Currency exchange rate fluctuation (USD / LRD conversion)',
+  'Minor customer change shortage / coin unavailable',
+  'Customer tip or extra cash left in drawer',
+  'Unrecorded small store supply / petty cash purchase',
+  'Unrecorded supplier restock cash payout',
+  'Cashier change calculation error',
+  'Counterfeit bill rejected / removed from drawer',
+  'Other (specify below)'
+];
 
 export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expenses = [] }) {
   const { currentUser } = useAuth();
@@ -36,10 +51,20 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
 
-  // Financial Security Gatekeeper state
+  // Financial Security Gatekeeper state (Unverified $50+ receipts)
   const [adminOverride, setAdminOverride] = useState(false);
   const [overrideReason, setOverrideReason] = useState('');
   const [uploadingReceiptFor, setUploadingReceiptFor] = useState(null);
+
+  // Discrepancy Gatekeeper state
+  const [discrepancyPreset, setDiscrepancyPreset] = useState('');
+  const [discrepancyCustom, setDiscrepancyCustom] = useState('');
+  const [managerApprovedDiscrepancy, setManagerApprovedDiscrepancy] = useState(false);
+  const [managerApproverName, setManagerApproverName] = useState('');
+  const [discrepancyError, setDiscrepancyError] = useState('');
+
+  const discrepancyInputRef = useRef(null);
+  const managerInputRef = useRef(null);
 
   // Compute shift financial aggregates
   const todayStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -91,11 +116,25 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
   const actualLRD = parseFloat(countedCashLRD) || 0;
   const lrdInUSD = exchangeRate > 0 ? actualLRD / exchangeRate : 0;
   const totalCountedUSD = actualUSD + lrdInUSD;
+  const hasCounted = countedCashUSD !== '' || countedCashLRD !== '';
 
   const varianceUSD = totalCountedUSD - expectedCashUSD;
-  const isBalanced = Math.abs(varianceUSD) < 0.05;
+  const absVarianceUSD = Math.abs(varianceUSD);
+
+  // Discrepancy policy tiers:
+  // <= $0.05: Balanced
+  // <= $5.00: Minor discrepancy (Cashier must explain, can close WITHOUT manager approval)
+  // > $5.00: Major discrepancy (Cashier must explain AND Manager Approval REQUIRED)
+  const isBalanced = hasCounted && absVarianceUSD <= 0.05;
+  const isMinorDiscrepancy = hasCounted && absVarianceUSD > 0.05 && absVarianceUSD <= 5.00;
+  const isMajorDiscrepancy = hasCounted && absVarianceUSD > 5.00;
   const isOver = varianceUSD > 0.05;
   const isShort = varianceUSD < -0.05;
+
+  const fullDiscrepancyReason = [
+    discrepancyPreset && discrepancyPreset !== 'Other (specify below)' ? discrepancyPreset : '',
+    discrepancyCustom.trim()
+  ].filter(Boolean).join(' - ');
 
   const [btPrinting, setBtPrinting] = useState(false);
 
@@ -164,15 +203,37 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
   };
 
   const handleSaveHandover = async () => {
+    setDiscrepancyError('');
+
     if (isGatekeeperBlocking) {
       alert('Financial Security Gatekeeper: You cannot close this shift while there are unverified expenses of $50 or more. Please attach receipts or check Manager Override.');
       return;
     }
 
     if (!countedCashUSD && !countedCashLRD) {
-      alert('Please enter the physical cash counted in the drawer (USD or LRD).');
+      setDiscrepancyError('Please enter the physical cash counted in the drawer (USD or LRD).');
       return;
     }
+
+    if (isMinorDiscrepancy && !fullDiscrepancyReason.trim()) {
+      setDiscrepancyError('Please provide an explanation for the minor variance (under $5.00) before closing the shift.');
+      if (discrepancyInputRef.current) discrepancyInputRef.current.focus();
+      return;
+    }
+
+    if (isMajorDiscrepancy) {
+      if (!fullDiscrepancyReason.trim()) {
+        setDiscrepancyError('Discrepancy exceeds $5.00: Please enter a mandatory cashier explanation.');
+        if (discrepancyInputRef.current) discrepancyInputRef.current.focus();
+        return;
+      }
+      if (!managerApprovedDiscrepancy) {
+        setDiscrepancyError('🔒 Shift Locked: Discrepancy exceeds $5.00. Manager authorization is required before closing.');
+        if (managerInputRef.current) managerInputRef.current.focus();
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       await addDoc(collection(db, 'shiftHandovers'), {
@@ -193,9 +254,15 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
         countedCashLRD: actualLRD,
         totalCountedUSD,
         varianceUSD,
+        absVarianceUSD,
         exchangeRate,
         notes,
         status: isBalanced ? 'balanced' : isOver ? 'over' : 'short',
+        isMinorDiscrepancy,
+        isMajorDiscrepancy,
+        discrepancyReason: fullDiscrepancyReason,
+        managerApprovedDiscrepancy: isMajorDiscrepancy ? managerApprovedDiscrepancy : false,
+        managerApproverName: isMajorDiscrepancy ? (managerApproverName.trim() || 'Manager Authorized') : '',
         adminOverrideUsed: hasUnverifiedExpenses && adminOverride,
         overrideReason: adminOverride ? overrideReason : '',
         unverifiedExpensesCount: unverifiedHighValueExpenses.length,
@@ -209,6 +276,13 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
       alert('Failed to save shift handover: ' + e.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleSaveHandover();
     }
   };
 
@@ -248,8 +322,18 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
             <button
               type="button"
               onClick={handleSaveHandover}
-              disabled={saving}
-              className="flex items-center gap-1.5 px-5 py-2 bg-[#efaa9b] hover:bg-[#e89887] text-[#45150b] rounded-xl text-xs font-black transition-colors shadow-lg shadow-[#efaa9b]/25 disabled:opacity-50"
+              disabled={saving || !hasCounted || (isMajorDiscrepancy && !managerApprovedDiscrepancy)}
+              className={`flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-black transition-colors shadow-lg active:scale-95 ${
+                isBalanced
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/25'
+                  : isMinorDiscrepancy
+                  ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/25'
+                  : isMajorDiscrepancy
+                  ? managerApprovedDiscrepancy
+                    ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/25'
+                    : 'bg-slate-700 text-slate-400 border border-slate-600 cursor-not-allowed opacity-60'
+                  : 'bg-[#efaa9b] hover:bg-[#e89887] text-[#45150b] shadow-[#efaa9b]/25'
+              }`}
             >
               {saving ? (
                 <span>Saving...</span>
@@ -258,6 +342,28 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
                   <CheckCircle className="w-4 h-4" />
                   <span>Handover Saved!</span>
                 </>
+              ) : isBalanced ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Balanced — Finalize Shift (Enter)</span>
+                </>
+              ) : isMinorDiscrepancy ? (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Finalize Shift (Minor Variance)</span>
+                </>
+              ) : isMajorDiscrepancy ? (
+                managerApprovedDiscrepancy ? (
+                  <>
+                    <Unlock className="w-4 h-4" />
+                    <span>Finalize Authorized Shift</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4" />
+                    <span>Shift Locked (Manager Approval Req.)</span>
+                  </>
+                )
               ) : (
                 <>
                   <FileText className="w-4 h-4" />
@@ -414,6 +520,7 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
                 step="0.01"
                 value={openingFloatUSD}
                 onChange={e => setOpeningFloatUSD(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="0.00"
                 className="w-full bg-slate-700 border border-slate-600 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-[#efaa9b]"
               />
@@ -427,6 +534,7 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
                 step="0.01"
                 value={countedCashUSD}
                 onChange={e => setCountedCashUSD(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="0.00"
                 className="w-full bg-slate-700 border border-slate-600 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-[#efaa9b]"
               />
@@ -440,6 +548,7 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
                 step="1"
                 value={countedCashLRD}
                 onChange={e => setCountedCashLRD(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="0"
                 className="w-full bg-slate-700 border border-slate-600 rounded-xl px-3 py-2 text-sm text-white font-mono focus:outline-none focus:border-[#efaa9b]"
               />
@@ -498,15 +607,145 @@ export default function ShiftHandoverModal({ isOpen, onClose, sales = [], expens
             </div>
           </div>
 
+          {/* ERROR ALERT BANNER */}
+          {discrepancyError && (
+            <div className="bg-rose-950/60 border border-rose-500/50 rounded-xl p-3 flex items-start gap-2 text-xs text-rose-300">
+              <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+              <span>{discrepancyError}</span>
+            </div>
+          )}
+
+          {/* MINOR DISCREPANCY (<= $5.00) */}
+          {isMinorDiscrepancy && (
+            <div className="bg-amber-950/40 border border-amber-500/50 rounded-xl p-3.5 text-xs space-y-2.5">
+              <div className="flex items-center gap-2 font-bold text-amber-300">
+                <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                <span>
+                  Minor Variance ({varianceUSD > 0 ? `+$${varianceUSD.toFixed(2)} OVER` : `-$${Math.abs(varianceUSD).toFixed(2)} SHORT`})
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-200/90">
+                Variances under <strong>$5.00 USD</strong> (or equivalent in LRD) are common due to exchange rate changes or small change rounding. Cashier must provide an explanation, and the shift can be closed <strong>without manager approval</strong>.
+              </p>
+
+              <div className="space-y-2">
+                <select
+                  value={discrepancyPreset}
+                  onChange={e => setDiscrepancyPreset(e.target.value)}
+                  className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                >
+                  <option value="">Select reason / common cause...</option>
+                  {COMMON_DISCREPANCY_REASONS.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                <input
+                  ref={discrepancyInputRef}
+                  type="text"
+                  value={discrepancyCustom}
+                  onChange={e => setDiscrepancyCustom(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Additional explanation (e.g. 50 LRD change shortage with customer)"
+                  className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* MAJOR DISCREPANCY (> $5.00) */}
+          {isMajorDiscrepancy && (
+            <div className="bg-rose-950/50 border-2 border-rose-500/70 rounded-2xl p-4 text-xs space-y-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 font-bold text-rose-300 text-sm">
+                  <ShieldAlert className="w-5 h-5 text-rose-400 flex-shrink-0 animate-pulse" />
+                  <span>
+                    Significant Cash Discrepancy ({varianceUSD > 0 ? `+$${varianceUSD.toFixed(2)} OVER` : `-$${Math.abs(varianceUSD).toFixed(2)} SHORT`})
+                  </span>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[10px] font-mono font-bold uppercase border border-rose-500/40">
+                  Manager Sign-Off Required
+                </span>
+              </div>
+
+              <div className="bg-slate-900/90 rounded-xl p-2.5 border border-rose-500/30 text-[11px] text-slate-300 space-y-1">
+                <p className="font-bold text-amber-300">🔎 Recount Checklist before closing:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-300 text-[10px]">
+                  <li>Verify drawer cash bills and coins</li>
+                  <li>Check unrecorded cash receipts or supplier payouts</li>
+                  <li>Check delivery COD envelopes</li>
+                </ul>
+              </div>
+
+              <div className="space-y-2">
+                <label className="block text-[11px] font-bold text-rose-300 uppercase tracking-wider">
+                  1. Cashier Explanation (Mandatory)
+                </label>
+                <select
+                  value={discrepancyPreset}
+                  onChange={e => setDiscrepancyPreset(e.target.value)}
+                  className="w-full bg-slate-900 border border-rose-500/40 rounded-xl px-3 py-2 text-xs text-white focus:outline-none"
+                >
+                  <option value="">Select reason / investigation outcome...</option>
+                  {COMMON_DISCREPANCY_REASONS.map(r => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+                <input
+                  ref={discrepancyInputRef}
+                  type="text"
+                  value={discrepancyCustom}
+                  onChange={e => setDiscrepancyCustom(e.target.value)}
+                  onKeyDown={handleKeyDown}
+                  placeholder="Detailed investigation notes..."
+                  className="w-full bg-slate-900 border border-rose-500/40 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-rose-400"
+                />
+              </div>
+
+              {/* Manager Sign-Off Gatekeeper */}
+              <div className="pt-2 border-t border-rose-500/30 space-y-2">
+                <label className="block text-[11px] font-bold text-rose-300 uppercase tracking-wider">
+                  2. Manager Authorization (Mandatory for &gt; $5.00)
+                </label>
+                <div className="bg-slate-900/90 p-3 rounded-xl border border-rose-500/40 space-y-2">
+                  <label className="flex items-center gap-2 text-xs text-white font-semibold cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={managerApprovedDiscrepancy}
+                      onChange={e => setManagerApprovedDiscrepancy(e.target.checked)}
+                      className="w-4 h-4 rounded border-rose-500 text-rose-600 focus:ring-rose-500"
+                    />
+                    <span>Manager Override & Authorization to finalize with variance</span>
+                  </label>
+
+                  {managerApprovedDiscrepancy && (
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-1">Authorizing Manager Name:</label>
+                      <input
+                        ref={managerInputRef}
+                        type="text"
+                        value={managerApproverName}
+                        onChange={e => setManagerApproverName(e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        placeholder="e.g., Joseph Doe / Store Manager"
+                        className="w-full bg-slate-800 border border-rose-500/40 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div>
             <label className="text-[11px] font-medium text-slate-400 block mb-1">
-              Shift Handover Notes / Drawer Explanations
+              General Handover Notes
             </label>
             <input
               type="text"
               value={notes}
               onChange={e => setNotes(e.target.value)}
-              placeholder="e.g., Handed over register to Sarah; minor change discrepancy due to 10 LRD bill shortage"
+              onKeyDown={handleKeyDown}
+              placeholder="e.g., Handed over register to Sarah; drawer keys left with manager"
               className="w-full bg-slate-700/60 border border-slate-600 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-[#efaa9b]"
             />
           </div>
