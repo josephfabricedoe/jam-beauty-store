@@ -16,9 +16,10 @@ service cloud.firestore {
       allow read, write: if isAuthenticated();
     }
 
-    // Customers & VIP Accounts
+    // Customers & VIP Accounts (public can register and order, authenticated staff have full management)
     match /customers/{customerId} {
-      allow read, write: if isAuthenticated();
+      allow create: if true;
+      allow read, update, delete: if isAuthenticated();
     }
 
     // Customer credit ledger & payments

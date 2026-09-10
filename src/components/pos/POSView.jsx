@@ -9,7 +9,7 @@ import Cart from './Cart';
 import ReceiptModal from './ReceiptModal';
 import ReceiptsHistoryModal from './ReceiptsHistoryModal';
 import { getPriceForMode } from './PricingModeSwitcher';
-import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth, X, Receipt, Filter, RotateCcw } from 'lucide-react';
+import { PackageOpen, AlertCircle, ShoppingBag, Check, Image as ImageIcon, Users, CreditCard, Bluetooth, X, Receipt, Filter, RotateCcw, Phone } from 'lucide-react';
 import { connectBluetoothPrinter, getConnectedPrinterName } from '../../utils/bluetoothPrinter';
 import { CATEGORIES, getProductPrimaryCategory } from '../public/CustomerCatalog';
 
@@ -255,16 +255,17 @@ export default function POSView() {
       let custName = selectedCust?.name || '';
       let custPhone = selectedCust?.phone || '';
 
-      // Auto-create new customer if name was typed in checkout
-      if (!custId && newCustomerName.trim()) {
+      // Auto-create new customer if name or phone was typed in checkout
+      if (!custId && (newCustomerName.trim() || newCustomerPhone.trim())) {
         try {
           const newCustDoc = await addDoc(collection(db, 'customers'), {
-            name: newCustomerName.trim(),
+            name: newCustomerName.trim() || 'Store Customer',
             phone: newCustomerPhone.trim(),
-            customerType: 'VIP Client',
+            customerType: 'Regular Retail',
             balanceOwed: remainingDue,
             creditLimit: 0,
             totalSpent: finalTotal,
+            source: 'pos_checkout',
             createdAt: serverTimestamp(),
             lastPurchaseDate: serverTimestamp(),
           });
@@ -272,7 +273,7 @@ export default function POSView() {
         } catch (custCreateErr) {
           console.warn('Customer auto-create permission warning:', custCreateErr);
         }
-        custName = newCustomerName.trim();
+        custName = newCustomerName.trim() || 'Store Customer';
         custPhone = newCustomerPhone.trim();
       }
 
@@ -700,6 +701,35 @@ export default function POSView() {
                     </option>
                   ))}
                 </select>
+
+                {/* If Walk-in customer, give cashier instant opportunity to capture customer phone for WhatsApp */}
+                {!selectedCustomerId && (
+                  <div className="mt-2 p-2.5 bg-slate-900/60 border border-slate-700/60 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-rose-300 flex items-center gap-1.5">
+                        <Phone className="w-3 h-3 text-rose-400" />
+                        Customer WhatsApp / Phone (Optional):
+                      </span>
+                      <span className="text-[10px] text-slate-400">Enrolls into CRM</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <input
+                        type="text"
+                        value={newCustomerName}
+                        onChange={e => setNewCustomerName(e.target.value)}
+                        placeholder="Customer Name (e.g. Mary)"
+                        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-rose-400"
+                      />
+                      <input
+                        type="tel"
+                        value={newCustomerPhone}
+                        onChange={e => setNewCustomerPhone(e.target.value)}
+                        placeholder="WhatsApp / Cell (e.g. 0770000000)"
+                        className="w-full bg-slate-800 border border-slate-600 rounded-lg px-2.5 py-1.5 text-white text-xs focus:outline-none focus:border-rose-400"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {selectedCustomerId && (() => {
                   const cust = customersList.find(c => c.id === selectedCustomerId);

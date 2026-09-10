@@ -11,6 +11,7 @@ import {
 
 export const CATEGORIES = [
   { id: 'All', label: 'ALL' },
+  { id: 'Bestsellers', label: '🔥 BESTSELLERS' },
   { id: 'Perfume', label: 'PERFUME' },
   { id: 'Skincare', label: 'SKINCARE' },
   { id: 'Body Lotion', label: 'BODY LOTION' },
@@ -43,6 +44,7 @@ function cleanWhatsAppPhone(phone) {
 
 export default function CustomerCatalog({ onGoToLogin }) {
   const [products, setProducts] = useState([]);
+  const [salesList, setSalesList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
@@ -54,6 +56,13 @@ export default function CustomerCatalog({ onGoToLogin }) {
   const [sortBy, setSortBy] = useState('featured'); // 'featured' | 'price-asc' | 'price-desc' | 'name-asc' | 'instock-first'
   const [selectedRawCategory, setSelectedRawCategory] = useState('All');
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
+
+  // VIP Club Newsletter State
+  const [vipName, setVipName] = useState('');
+  const [vipPhone, setVipPhone] = useState('');
+  const [vipEmail, setVipEmail] = useState('');
+  const [vipSubmitted, setVipSubmitted] = useState(false);
+  const [vipSubmitting, setVipSubmitting] = useState(false);
 
   const { exchangeRate, storeSettings } = useApp();
 
@@ -86,7 +95,7 @@ export default function CustomerCatalog({ onGoToLogin }) {
   const storeHours = storeSettings?.storeHours || 'Mon - Sat: 8:30 AM - 6:30 PM';
 
   useEffect(() => {
-    return onSnapshot(
+    const unsubProducts = onSnapshot(
       collection(db, 'products'),
       (snap) => {
         setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -97,6 +106,58 @@ export default function CustomerCatalog({ onGoToLogin }) {
         setLoading(false);
       }
     );
+
+    const unsubSales = onSnapshot(
+      collection(db, 'sales'),
+      (snap) => {
+        setSalesList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
+      (err) => {
+        console.warn('Sales listener notice:', err);
+      }
+    );
+
+    // Deep Linking: Parse URL query parameters
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const filterParam = urlParams.get('filter') || urlParams.get('tab');
+      const catParam = urlParams.get('category');
+      const searchParam = urlParams.get('search');
+
+      if (filterParam === 'bestsellers' || (catParam && catParam.toLowerCase() === 'bestsellers')) {
+        setActiveCategory('Bestsellers');
+        setTimeout(() => {
+          const el = document.getElementById('catalog-grid');
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 350);
+      } else if (catParam) {
+        const found = CATEGORIES.find(
+          c => c.id.toLowerCase() === catParam.toLowerCase() || c.label.toLowerCase().includes(catParam.toLowerCase())
+        );
+        if (found) {
+          setActiveCategory(found.id);
+          setTimeout(() => {
+            const el = document.getElementById('catalog-grid');
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+          }, 350);
+        }
+      }
+
+      if (searchParam) {
+        setSearchTerm(searchParam);
+        setTimeout(() => {
+          const el = document.getElementById('catalog-grid');
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }, 350);
+      }
+    } catch (e) {
+      console.warn('URL parsing notice:', e);
+    }
+
+    return () => {
+      unsubProducts();
+      unsubSales();
+    };
   }, []);
 
   useEffect(() => {
@@ -201,9 +262,43 @@ export default function CustomerCatalog({ onGoToLogin }) {
       .sort((a, b) => b.count - a.count);
   }, [products]);
 
+  // Compute top 20 bestsellers by sales frequency & quantity
+  const { top20BestsellerIds, top20BestsellerSet } = React.useMemo(() => {
+    const productSoldQtyMap = {};
+    salesList.forEach(sale => {
+      if (Array.isArray(sale.items)) {
+        sale.items.forEach(it => {
+          const key = it.productId || it.barcode || it.name;
+          if (key) {
+            productSoldQtyMap[key] = (productSoldQtyMap[key] || 0) + (Number(it.quantity) || 1);
+          }
+        });
+      }
+    });
+
+    // Rank products by total units sold
+    const ranked = [...products].sort((a, b) => {
+      const soldA = (productSoldQtyMap[a.id] || 0) + (productSoldQtyMap[a.barcode] || 0) + (productSoldQtyMap[a.name] || 0);
+      const soldB = (productSoldQtyMap[b.id] || 0) + (productSoldQtyMap[b.barcode] || 0) + (productSoldQtyMap[b.name] || 0);
+      if (soldB !== soldA) return soldB - soldA;
+      // Fallback: showroom quantity higher or has photo
+      const qtyA = (a.showroomQty || 0) + (a.storeroomQty || 0);
+      const qtyB = (b.showroomQty || 0) + (b.storeroomQty || 0);
+      return qtyB - qtyA;
+    });
+
+    const top20 = ranked.slice(0, 20).map(p => p.id || p.barcode);
+    return {
+      top20BestsellerIds: top20,
+      top20BestsellerSet: new Set(top20),
+    };
+  }, [salesList, products]);
+
   // Comprehensive Filtering & Sorting
   const filtered = React.useMemo(() => {
     let result = products.filter(p => {
+      const pId = p.id || p.barcode;
+
       // 1. Text Search
       if (searchTerm.trim()) {
         const q = searchTerm.toLowerCase();
@@ -229,8 +324,11 @@ export default function CustomerCatalog({ onGoToLogin }) {
         if ((p.category || '').trim().toLowerCase() !== selectedRawCategory.toLowerCase()) return false;
       }
 
-      // 5. Category Navigation filter (when not overriding with specific raw category)
-      if (activeCategory !== 'All' && (!selectedRawCategory || selectedRawCategory === 'All')) {
+      // 5. Category Navigation filter
+      if (activeCategory === 'Bestsellers') {
+        const isBestseller = top20BestsellerSet.has(pId) || top20BestsellerSet.has(p.id) || top20BestsellerSet.has(p.barcode);
+        if (!isBestseller) return false;
+      } else if (activeCategory !== 'All' && (!selectedRawCategory || selectedRawCategory === 'All')) {
         const primaryCat = getProductPrimaryCategory(p);
         if (activeCategory === 'Other Products') {
           if (primaryCat !== 'Other Products') return false;
@@ -342,8 +440,22 @@ export default function CustomerCatalog({ onGoToLogin }) {
         status: 'pending_whatsapp',
         timestamp: serverTimestamp(),
       });
+
+      // Save customer into customers collection for CRM & WhatsApp marketing
+      await addDoc(collection(db, 'customers'), {
+        name: customerName.trim(),
+        phone: customerPhone.trim(),
+        deliveryLocation: deliveryLocation.trim(),
+        source: 'website_order',
+        customerType: 'Online Store Customer',
+        totalSpent: totalCartUSD,
+        orderCount: 1,
+        lastPurchaseDate: serverTimestamp(),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
     } catch (err) {
-      console.warn('Order logging notice:', err);
+      console.warn('Order/Customer logging notice:', err);
     }
 
     const waPhone = cleanWhatsAppPhone(businessWhatsApp);
@@ -353,6 +465,35 @@ export default function CustomerCatalog({ onGoToLogin }) {
     window.open(waUrl, '_blank');
     setOrderSubmitted(true);
     clearCart();
+  };
+
+  // Handle VIP Club Newsletter Registration
+  const handleVipSubmit = async (e) => {
+    e.preventDefault();
+    if (!vipPhone.trim()) return;
+
+    setVipSubmitting(true);
+    try {
+      await addDoc(collection(db, 'customers'), {
+        name: vipName.trim() || 'VIP Club Member',
+        phone: vipPhone.trim(),
+        email: vipEmail.trim() || null,
+        source: 'website_vip_club',
+        customerType: 'VIP Client',
+        notes: 'Subscribed on website for WhatsApp secret drops & promotions',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      setVipSubmitted(true);
+      setVipName('');
+      setVipPhone('');
+      setVipEmail('');
+    } catch (err) {
+      console.warn('VIP club subscription error:', err);
+      setVipSubmitted(true);
+    } finally {
+      setVipSubmitting(false);
+    }
   };
 
   const scrollToCatalog = () => {
@@ -883,7 +1024,12 @@ export default function CustomerCatalog({ onGoToLogin }) {
                       </div>
                     )}
 
-                    <div className="absolute top-2 left-2">
+                    <div className="absolute top-2 left-2 flex flex-col gap-1 items-start">
+                      {(top20BestsellerSet.has(pId) || top20BestsellerSet.has(product.id) || top20BestsellerSet.has(product.barcode)) && (
+                        <span className="px-2 py-0.5 rounded text-[9px] font-extrabold uppercase tracking-wider bg-rose-600 text-white shadow-xs">
+                          🔥 Bestseller
+                        </span>
+                      )}
                       <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider ${
                         inStock ? 'bg-emerald-100 text-emerald-800' : 'bg-stone-200 text-stone-700'
                       }`}>
@@ -975,6 +1121,77 @@ export default function CustomerCatalog({ onGoToLogin }) {
             </button>
           </div>
         )}
+      </section>
+
+      {/* 5.5. VIP CLUB & WHATSAPP EXCLUSIVE DROPS SIGNUP */}
+      <section className="max-w-5xl mx-auto px-4 sm:px-6 my-12 w-full">
+        <div className="bg-gradient-to-br from-[#fbf5f4] via-white to-[#fbf5f4] border-2 border-[#efaa9b]/50 rounded-3xl p-6 sm:p-10 shadow-lg shadow-[#efaa9b]/10 text-center relative overflow-hidden">
+          <div className="max-w-xl mx-auto space-y-4">
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-[#efaa9b]/25 text-[#45150b]">
+              <Sparkles className="w-3.5 h-3.5 text-[#df9487]" />
+              JAM Beauty VIP Club
+            </span>
+
+            <h3 className="font-serif text-2xl sm:text-3xl font-extrabold text-[#45150b] tracking-tight">
+              Get Secret WhatsApp Drop Alerts & Special VIP Offers
+            </h3>
+
+            <p className="text-xs sm:text-sm text-stone-600 leading-relaxed">
+              Be the first to know when rare perfumes restock, enjoy members-only flash discounts, and receive direct beauty consultations on WhatsApp.
+            </p>
+
+            {vipSubmitted ? (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs sm:text-sm font-semibold flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                <span>🎉 Welcome to the VIP Club! You are now registered for our exclusive WhatsApp drops.</span>
+              </div>
+            ) : (
+              <form onSubmit={handleVipSubmit} className="space-y-3 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-left">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-stone-600 mb-1">Your Name</label>
+                    <input
+                      type="text"
+                      value={vipName}
+                      onChange={e => setVipName(e.target.value)}
+                      placeholder="e.g. Marie Claire"
+                      className="w-full bg-white border border-stone-300 rounded-xl px-3 py-2.5 text-xs text-stone-900 focus:outline-none focus:border-[#df9487]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-stone-600 mb-1">WhatsApp Cell Phone *</label>
+                    <input
+                      type="tel"
+                      required
+                      value={vipPhone}
+                      onChange={e => setVipPhone(e.target.value)}
+                      placeholder="e.g. 0770 000 000"
+                      className="w-full bg-white border border-stone-300 rounded-xl px-3 py-2.5 text-xs text-stone-900 focus:outline-none focus:border-[#df9487]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-stone-600 mb-1">Email Address (Optional)</label>
+                    <input
+                      type="email"
+                      value={vipEmail}
+                      onChange={e => setVipEmail(e.target.value)}
+                      placeholder="you@email.com"
+                      className="w-full bg-white border border-stone-300 rounded-xl px-3 py-2.5 text-xs text-stone-900 focus:outline-none focus:border-[#df9487]"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={vipSubmitting}
+                  className="w-full sm:w-auto px-8 py-3 bg-[#45150b] hover:bg-[#341008] text-white rounded-xl text-xs sm:text-sm font-bold uppercase tracking-wider transition-all shadow-md shadow-[#45150b]/20 active:scale-98"
+                >
+                  {vipSubmitting ? 'Joining...' : 'Join VIP Club via WhatsApp'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
       </section>
 
       {/* 6. STORE FOOTER */}

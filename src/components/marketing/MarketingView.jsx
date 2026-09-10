@@ -44,6 +44,7 @@ export default function MarketingView({ onNavigateToCustomers = null }) {
   // Firestore live collections
   const [customers, setCustomers] = useState([]);
   const [sales, setSales] = useState([]);
+  const [products, setProducts] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -81,6 +82,16 @@ export default function MarketingView({ onNavigateToCustomers = null }) {
       }
     );
 
+    const unsubProducts = onSnapshot(
+      collection(db, 'products'),
+      (snap) => {
+        setProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      },
+      (err) => {
+        console.warn('Marketing products listener notice:', err);
+      }
+    );
+
     const unsubCampaigns = onSnapshot(
       collection(db, 'marketingCampaigns'),
       (snap) => {
@@ -100,6 +111,7 @@ export default function MarketingView({ onNavigateToCustomers = null }) {
     return () => {
       unsubCustomers();
       unsubSales();
+      unsubProducts();
       unsubCampaigns();
     };
   }, []);
@@ -840,6 +852,7 @@ export default function MarketingView({ onNavigateToCustomers = null }) {
         onClose={() => setIsCampaignModalOpen(false)}
         onLaunchQueue={handleLaunchQueue}
         customers={enrichedCustomers}
+        products={products}
       />
     </div>
   );

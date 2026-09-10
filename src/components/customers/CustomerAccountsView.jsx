@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   collection,
   onSnapshot,
@@ -32,6 +32,8 @@ import {
   ChevronUp,
   FileText,
   Filter,
+  Download,
+  Upload,
 } from 'lucide-react';
 
 const CUSTOMER_TYPES = ['Salon / Hair Stylist', 'Wholesale Reseller', 'VIP Client', 'Regular Retail'];
@@ -74,6 +76,10 @@ export default function CustomerAccountsView() {
   const [creditLimit, setCreditLimit] = useState('500');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // CSV Import/Export state
+  const customerFileInputRef = useRef(null);
+  const [customerImportMsg, setCustomerImportMsg] = useState('');
 
   // Subscribe to live Firestore collections
   useEffect(() => {
@@ -470,6 +476,100 @@ export default function CustomerAccountsView() {
     }) + ' ' + dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  // Export CSV of customers
+  const handleExportCustomersCSV = () => {
+    if (mergedCustomers.length === 0) {
+      alert('No customer records to export.');
+      return;
+    }
+
+    const headers = ['Name', 'Phone', 'Email', 'Customer Type', 'Credit Limit', 'Balance Owed', 'Total Purchases', 'Notes'];
+    const rows = mergedCustomers.map(c => [
+      `"${(c.name || '').replace(/"/g, '""')}"`,
+      `"${(c.phone || '').replace(/"/g, '""')}"`,
+      `"${(c.email || '').replace(/"/g, '""')}"`,
+      `"${(c.customerType || 'VIP Client').replace(/"/g, '""')}"`,
+      Number(c.creditLimit || 0),
+      Number(c.balanceOwed || 0),
+      Number(c.totalPurchases || 0),
+      `"${(c.notes || '').replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `jam_beauty_customers_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Download sample CSV template
+  const handleDownloadTemplate = () => {
+    const headers = ['Name', 'Phone', 'Email', 'Customer Type', 'Credit Limit', 'Notes'];
+    const sampleRows = [
+      ['Sarah Jenkins', '0770123456', 'sarah@example.com', 'VIP Client', '500', 'Prefers Arabian perfumes'],
+      ['Glam Beauty Salon', '0886123456', 'glam@example.com', 'Salon / Hair Stylist', '1000', 'Wholesale buyer'],
+    ];
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...sampleRows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'jam_beauty_customers_template.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Import customers from CSV
+  const handleImportCustomersCSV = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const text = event.target.result;
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
+        if (lines.length < 2) {
+          alert('CSV file is empty or missing headers.');
+          return;
+        }
+
+        let imported = 0;
+        for (let i = 1; i < lines.length; i++) {
+          const parts = lines[i].split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+          if (parts[0]) {
+            const custData = {
+              name: parts[0],
+              phone: parts[1] || '',
+              email: parts[2] || '',
+              customerType: parts[3] || 'VIP Client',
+              creditLimit: parseFloat(parts[4]) || 0,
+              balanceOwed: 0,
+              totalPurchases: 0,
+              notes: parts[5] || '',
+              source: 'csv_import',
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            };
+            await addDoc(collection(db, 'customers'), custData);
+            imported++;
+          }
+        }
+        setCustomerImportMsg(`Successfully imported ${imported} customer profiles!`);
+        setTimeout(() => setCustomerImportMsg(''), 4000);
+      } catch (err) {
+        console.error('Failed to import CSV:', err);
+        alert('Failed to parse CSV file: ' + err.message);
+      } finally {
+        if (customerFileInputRef.current) customerFileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
     <div className="p-4 max-w-6xl mx-auto space-y-4">
       {/* Top Header & Tab Switcher */}
@@ -511,6 +611,45 @@ export default function CustomerAccountsView() {
             </button>
           </div>
 
+          {/* Export CSV */}
+          <button
+            type="button"
+            onClick={handleExportCustomersCSV}
+            className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors"
+            title="Export all customers to CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-slate-400" />
+            <span className="hidden sm:inline">Export</span>
+          </button>
+
+          {/* Import CSV */}
+          <input
+            type="file"
+            ref={customerFileInputRef}
+            onChange={handleImportCustomersCSV}
+            accept=".csv"
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => customerFileInputRef.current?.click()}
+            className="flex items-center gap-1 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors"
+            title="Import customer list from CSV"
+          >
+            <Upload className="w-3.5 h-3.5 text-slate-400" />
+            <span className="hidden sm:inline">Import</span>
+          </button>
+
+          {/* Template Download */}
+          <button
+            type="button"
+            onClick={handleDownloadTemplate}
+            className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-400 hover:text-amber-300 rounded-xl text-xs font-medium transition-colors"
+            title="Download CSV format template"
+          >
+            ↓ Template
+          </button>
+
           <button
             type="button"
             onClick={openAddModal}
@@ -521,6 +660,13 @@ export default function CustomerAccountsView() {
           </button>
         </div>
       </div>
+
+      {customerImportMsg && (
+        <div className="p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
+          <CheckCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{customerImportMsg}</span>
+        </div>
+      )}
 
       {/* Summary Metrics Chips */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
