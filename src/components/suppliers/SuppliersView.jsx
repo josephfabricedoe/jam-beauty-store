@@ -4,6 +4,7 @@ import {
   onSnapshot, 
   doc, 
   updateDoc, 
+  deleteDoc,
   increment,
   serverTimestamp, 
   addDoc 
@@ -817,17 +818,45 @@ export default function SuppliersView() {
                             {format(p.costPrice || 0)}
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedSupplierForRestock(null);
-                                setPrefilledRestockItems([p]);
-                                setIsRestockModalOpen(true);
-                              }}
-                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-rose-400 hover:text-white rounded-lg text-xs font-semibold transition-colors"
-                            >
-                              Restock Item
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedSupplierForRestock(null);
+                                  setPrefilledRestockItems([p]);
+                                  setIsRestockModalOpen(true);
+                                }}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-rose-400 hover:text-white rounded-lg text-xs font-semibold transition-colors"
+                              >
+                                Restock Item
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (window.confirm(`Stop restocking "${p.name}"?\n\nThis will set its minimum reorder trigger to 0 so it will never appear under 'Needs Restock' again.`)) {
+                                    await updateDoc(doc(db, 'products', p.id), { reorderTrigger: 0, updatedAt: serverTimestamp() });
+                                  }
+                                }}
+                                title="Stop Restocking (Sets reorder trigger to 0)"
+                                className="px-2 py-1 bg-slate-800 hover:bg-amber-600 text-slate-400 hover:text-white rounded-lg text-[11px] font-medium transition-colors border border-slate-700"
+                              >
+                                Stop Restocking
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (window.confirm(`⚠️ PERMANENTLY DELETE "${p.name}" from your store catalog?\n\nThis will remove it completely from Showroom, Storeroom, and Reports.`)) {
+                                    await deleteDoc(doc(db, 'products', p.id));
+                                  }
+                                }}
+                                title="Delete item permanently from catalog"
+                                className="p-1 text-slate-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );

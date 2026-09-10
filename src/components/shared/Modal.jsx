@@ -10,7 +10,17 @@ export default function Modal({ isOpen, onClose, title, children, size = 'md', f
 
   if (!isOpen) return null;
 
-  const sizes = { sm: 'max-w-sm', md: 'max-w-md', lg: 'max-w-lg', xl: 'max-w-xl', '2xl': 'max-w-2xl', full: 'max-w-4xl' };
+  const sizes = { 
+    sm: 'max-w-sm', 
+    md: 'max-w-md', 
+    lg: 'max-w-lg', 
+    xl: 'max-w-xl', 
+    '2xl': 'max-w-2xl', 
+    '3xl': 'max-w-3xl',
+    '4xl': 'max-w-4xl',
+    '5xl': 'max-w-5xl',
+    full: 'max-w-5xl' 
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

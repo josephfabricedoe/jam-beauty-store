@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Modal from '../shared/Modal';
 import { useCurrency } from '../../hooks/useCurrency';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, doc, updateDoc, increment, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, deleteDoc, increment, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { compressReceiptImage } from '../../utils/receiptCompressor';
 import { 
@@ -218,8 +218,49 @@ export default function RestockOrderModal({
     });
   };
 
-  const removeItem = (index) => {
+  const handleRemoveItem = (index) => {
     setItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleDiscontinueProduct = async (item, index) => {
+    if (!item.productId) {
+      handleRemoveItem(index);
+      return;
+    }
+    const confirmed = window.confirm(
+      `Stop restocking "${item.name}"?\n\nThis will set its minimum reorder trigger to 0 so it will NEVER appear under "Needs Restock" again.\n\nClick OK to confirm.`
+    );
+    if (!confirmed) return;
+
+    try {
+      await updateDoc(doc(db, 'products', item.productId), {
+        reorderTrigger: 0,
+        updatedAt: serverTimestamp(),
+      });
+      handleRemoveItem(index);
+    } catch (err) {
+      console.error('Failed to discontinue product:', err);
+      alert('Could not update product: ' + err.message);
+    }
+  };
+
+  const handleDeleteProductPermanently = async (item, index) => {
+    if (!item.productId) {
+      handleRemoveItem(index);
+      return;
+    }
+    const confirmed = window.confirm(
+      `⚠️ PERMANENTLY DELETE "${item.name}" from your store catalog?\n\nThis will remove it completely from Showroom, Storeroom, and Reports.\n\nAre you sure?`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteDoc(doc(db, 'products', item.productId));
+      handleRemoveItem(index);
+    } catch (err) {
+      console.error('Failed to delete product:', err);
+      alert('Could not delete product: ' + err.message);
+    }
   };
 
   const handleAddProduct = (productId) => {
@@ -486,6 +527,7 @@ export default function RestockOrderModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
+      size="5xl"
       title={activeSupplier ? `Restock: ${activeSupplier.name}` : (targetProduct ? `Restock: ${targetProduct.name}` : 'Generate Restock Order')}
     >
       <div className="space-y-4 max-h-[80vh] overflow-y-auto pr-1 text-xs">
@@ -641,12 +683,12 @@ export default function RestockOrderModal({
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider">
                 <tr>
-                  <th className="px-3 py-2">Product</th>
-                  <th className="px-2 py-2 text-center">Stock</th>
-                  <th className="px-3 py-2 text-center w-20">Order Qty</th>
-                  <th className="px-3 py-2 text-right w-24">Unit Cost ($)</th>
-                  <th className="px-3 py-2 text-right">Subtotal</th>
-                  <th className="px-2 py-2 text-center"></th>
+                  <th className="px-3 py-2.5">Product</th>
+                  <th className="px-2 py-2.5 text-center">Stock</th>
+                  <th className="px-3 py-2.5 text-center w-24">Order Qty</th>
+                  <th className="px-3 py-2.5 text-right w-28">Unit Cost ($)</th>
+                  <th className="px-3 py-2.5 text-right">Subtotal</th>
+                  <th className="px-3 py-2.5 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
@@ -667,17 +709,23 @@ export default function RestockOrderModal({
                   items.map((item, idx) => {
                     const lineSubtotal = (item.orderQty || 0) * (item.costPrice || 0);
                     return (
-                      <tr key={item.productId || idx} className="hover:bg-slate-800/40">
-                        <td className="px-3 py-2 text-white font-medium">
-                          <div className="truncate max-w-[160px] sm:max-w-xs">{item.name}</div>
+                      <tr key={item.productId || idx} className="hover:bg-slate-800/40 transition-colors">
+                        <td className="px-3 py-2.5 text-white font-medium">
+                          <div className="font-semibold text-white text-xs">{item.name}</div>
                           {item.category && (
                             <div className="text-[10px] text-slate-400">{item.category}</div>
                           )}
                         </td>
-                        <td className="px-2 py-2 text-center text-slate-300">
-                          {item.currentStock}
+                        <td className="px-2 py-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded font-bold text-xs ${
+                            (item.currentStock || 0) <= 0 
+                              ? 'bg-red-500/20 text-red-300 border border-red-500/30' 
+                              : 'text-slate-300'
+                          }`}>
+                            {item.currentStock}
+                          </span>
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-3 py-2.5 text-center">
                           <input
                             type="number"
                             min="1"
@@ -686,7 +734,7 @@ export default function RestockOrderModal({
                             className="w-16 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-center font-bold text-white focus:outline-none focus:border-rose-500"
                           />
                         </td>
-                        <td className="px-3 py-2 text-right">
+                        <td className="px-3 py-2.5 text-right">
                           <input
                             type="number"
                             step="0.01"
@@ -696,17 +744,42 @@ export default function RestockOrderModal({
                             className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-right text-slate-200 focus:outline-none focus:border-rose-500"
                           />
                         </td>
-                        <td className="px-3 py-2 text-right font-semibold text-[#efaa9b]">
+                        <td className="px-3 py-2.5 text-right font-semibold text-[#efaa9b]">
                           {format(lineSubtotal)}
                         </td>
-                        <td className="px-2 py-2 text-center">
-                          <button
-                            type="button"
-                            onClick={() => removeItem(idx)}
-                            className="p-1 text-slate-500 hover:text-red-400"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                        <td className="px-3 py-2.5 text-center whitespace-nowrap">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {/* Remove from this restock order */}
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(idx)}
+                              title="Remove from this restock order"
+                              className="flex items-center gap-1 px-2.5 py-1 bg-red-500/15 hover:bg-red-500 text-red-300 hover:text-white rounded-lg text-xs font-semibold transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              <span>Remove</span>
+                            </button>
+
+                            {/* Don't restock anymore */}
+                            <button
+                              type="button"
+                              onClick={() => handleDiscontinueProduct(item, idx)}
+                              title="Stop restocking this product in the future (Sets min trigger to 0)"
+                              className="px-2 py-1 bg-slate-800 hover:bg-amber-600 text-slate-400 hover:text-white rounded-lg text-[11px] font-medium transition-colors border border-slate-700"
+                            >
+                              Stop Restocking
+                            </button>
+
+                            {/* Delete permanently from store catalog */}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteProductPermanently(item, idx)}
+                              title="Delete permanently from catalog"
+                              className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-red-500/20 rounded-lg transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
