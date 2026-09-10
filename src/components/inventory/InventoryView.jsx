@@ -4,8 +4,10 @@ import StoreroomTable from './StoreroomTable';
 import TransferModal from './TransferModal';
 import CSVImport from './CSVImport';
 import RestockOrderModal from '../suppliers/RestockOrderModal';
+import StockAuditModal from './StockAuditModal';
 import { useAuth } from '../../hooks/useAuth';
-import { Store, Warehouse, Upload } from 'lucide-react';
+import { isOwner, isManager } from '../../utils/rbac';
+import { Store, Warehouse, Upload, ClipboardCheck } from 'lucide-react';
 
 const TABS = [
   { id: 'showroom', label: 'Showroom', icon: Store },
@@ -17,14 +19,15 @@ export default function InventoryView() {
   const [transferProduct, setTransferProduct] = useState(null);
   const [restockProduct, setRestockProduct] = useState(null);
   const [showImport, setShowImport] = useState(false);
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
   const { userProfile } = useAuth();
   const isOwnerUser = isOwner(userProfile?.role);
   const canImport = isOwnerUser || isManager(userProfile?.role);
 
   return (
     <div className="p-4 space-y-4">
-      {/* Tabs + CSV import button */}
-      <div className="flex items-center justify-between">
+      {/* Tabs + CSV import + Stock Audit buttons */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex gap-1 bg-slate-800 p-1 rounded-xl">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
@@ -39,6 +42,15 @@ export default function InventoryView() {
         </div>
         {canImport && (
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAuditModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 hover:border-emerald-400 text-slate-300 hover:text-emerald-300 rounded-xl text-sm font-semibold transition-colors"
+              title="Conduct physical shelf or warehouse cycle count audit"
+            >
+              <ClipboardCheck className="w-4 h-4 text-emerald-400" />
+              <span>Stock Audit</span>
+            </button>
             <a href="/inventory-template.csv" download
               className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 border border-slate-700 hover:border-amber-400 text-slate-400 hover:text-amber-300 rounded-xl text-sm transition-colors">
               ↓ Template
@@ -80,6 +92,12 @@ export default function InventoryView() {
           targetProduct={restockProduct}
         />
       )}
+
+      {/* Physical Stock Audit & Cycle Count Modal */}
+      <StockAuditModal
+        isOpen={auditModalOpen}
+        onClose={() => setAuditModalOpen(false)}
+      />
     </div>
   );
 }

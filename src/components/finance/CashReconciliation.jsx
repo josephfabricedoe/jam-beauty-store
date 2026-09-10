@@ -16,7 +16,10 @@ import {
   ShieldCheck, 
   CheckCircle2, 
   Lock, 
-  Unlock 
+  Unlock,
+  MessageCircle,
+  Copy,
+  Check
 } from 'lucide-react';
 
 const COMMON_REASONS = [
@@ -48,6 +51,7 @@ export default function CashReconciliation({
   const [errorMessage, setErrorMessage] = useState('');
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState(null);
+  const [copiedReport, setCopiedReport] = useState(false);
 
   const reasonInputRef = useRef(null);
   const managerNameInputRef = useRef(null);
@@ -55,6 +59,46 @@ export default function CashReconciliation({
   const { currentUser, userProfile } = useAuth();
   const { exchangeRate = 195 } = useApp();
   const { format } = useCurrency();
+
+  const generateZReportText = () => {
+    const dateStr = dateLabel || new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    const cashierName = userProfile?.displayName || currentUser?.email || 'Store Cashier';
+    const roleName = userProfile?.role ? userProfile.role.toUpperCase() : 'CASHIER';
+
+    const statusStr = result?.isBalanced
+      ? 'BALANCED ($0.00 variance)'
+      : (result?.variance || 0) >= 0
+      ? `OVERAGE (+${format(result?.variance || 0)})`
+      : `SHORTAGE (-${format(Math.abs(result?.variance || 0))})`;
+
+    return `✨ *JAM BEAUTY STORE — DAILY EXECUTIVE Z-REPORT* ✨
+📅 *Date:* ${dateStr}
+👤 *Duty Staff:* ${cashierName} (${roleName})
+
+💵 *FINANCIAL OVERVIEW:*
+• Gross Store Sales: ${format(grossRevenue)}
+• Cash Register Sales: ${format(cashSales)}
+• Delivery Cash (COD): ${format(deliveryCash)}
+• Operating Cash Expenses: ${format(expenses)}
+
+🏦 *CASH DRAWER RECONCILIATION:*
+• System Expected Cash: ${format(expectedCash)}
+• Physical Cash Counted: ${format(result?.counted || totalCountedUSD)}
+• Drawer Status: ${statusStr}
+${result?.explanation ? `• Recorded Reason: ${result.explanation}\n` : ''}${result?.managerName ? `• Authorized By: ${result.managerName}\n` : ''}
+✅ Shift successfully balanced & closed in store database.
+📍 JAM Beauty Store · Official Operations`;
+  };
+
+  const handleCopyZReport = async () => {
+    try {
+      await navigator.clipboard.writeText(generateZReportText());
+      setCopiedReport(true);
+      setTimeout(() => setCopiedReport(false), 2500);
+    } catch (e) {
+      console.warn('Copy failed:', e);
+    }
+  };
 
   // Cash counting calculation
   const usdNum = parseFloat(countedUSD) || 0;
@@ -313,10 +357,62 @@ export default function CashReconciliation({
               </div>
             )}
 
+            {/* Daily Executive WhatsApp Z-Report Card */}
+            <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-2xl p-4 text-left space-y-3 max-w-md mx-auto">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center">
+                    <MessageCircle className="w-4 h-4 text-emerald-400" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-white text-xs">Executive WhatsApp Z-Report</h4>
+                    <p className="text-[10px] text-emerald-300/80">Daily Briefing for Malydia & Joseph</p>
+                  </div>
+                </div>
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                  Ready to Send
+                </span>
+              </div>
+
+              <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-700/80 text-[11px] font-mono text-slate-300 whitespace-pre-wrap max-h-36 overflow-y-auto leading-relaxed select-all">
+                {generateZReportText()}
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <a
+                  href={`https://api.whatsapp.com/send?text=${encodeURIComponent(generateZReportText())}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-600/20"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>Send via WhatsApp</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={handleCopyZReport}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-colors"
+                >
+                  {copiedReport ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-400" />
+                      <span className="text-emerald-400">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
             <button
               type="button"
               onClick={() => setOpen(false)}
-              className="px-6 py-2.5 bg-rose-500 hover:bg-rose-400 text-white rounded-xl text-sm font-bold transition-colors"
+              className="px-6 py-2.5 bg-rose-500 hover:bg-rose-400 text-white rounded-xl text-sm font-bold transition-colors shadow-md shadow-rose-500/20"
             >
               Close & Complete
             </button>
