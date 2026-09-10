@@ -3,6 +3,8 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut as fbSignOut, c
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 
+import { normalizeRole, isOwner, isManager, isCashier, isDelivery } from '../utils/rbac';
+
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
@@ -35,7 +37,7 @@ export function AuthProvider({ children }) {
                 uid: user.uid,
                 email: user.email,
                 displayName: user.displayName || user.email?.split('@')[0] || 'Store Admin',
-                role: 'admin',
+                role: 'owner',
                 createdAt: serverTimestamp(),
               };
               try {
@@ -48,7 +50,7 @@ export function AuthProvider({ children }) {
           })
           .catch((e) => {
             console.warn('Profile fetch notice:', e);
-            if (mounted) setUserProfile({ role: 'admin', displayName: user.email });
+            if (mounted) setUserProfile({ role: 'owner', displayName: user.email });
           });
       } else {
         setUserProfile(null);
@@ -66,7 +68,7 @@ export function AuthProvider({ children }) {
 
   const signOut = () => fbSignOut(auth);
 
-  const createAccount = async (email, password, displayName, role = 'staff') => {
+  const createAccount = async (email, password, displayName, role = 'cashier') => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await updateProfile(cred.user, { displayName });
     await setDoc(doc(db, 'users', cred.user.uid), {
@@ -79,8 +81,22 @@ export function AuthProvider({ children }) {
     return cred;
   };
 
+  const currentRole = normalizeRole(userProfile?.role);
+
   return (
-    <AuthContext.Provider value={{ currentUser, userProfile, loading, signIn, signOut, createAccount }}>
+    <AuthContext.Provider value={{ 
+      currentUser, 
+      userProfile, 
+      loading, 
+      signIn, 
+      signOut, 
+      createAccount,
+      currentRole,
+      isOwner: isOwner(currentRole),
+      isManager: isManager(currentRole),
+      isCashier: isCashier(currentRole),
+      isDelivery: isDelivery(currentRole),
+    }}>
       {children}
     </AuthContext.Provider>
   );

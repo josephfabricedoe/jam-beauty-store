@@ -314,15 +314,17 @@ export default function ShowroomTable({ onRestockClick }) {
                             {/* Actions: Restock + Edit + Barcode + Tester */}
                             <td className="px-3 py-2">
                               <div className="flex items-center justify-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => onRestockClick ? onRestockClick(p) : null}
-                                  title="1-Click Restock with Supplier"
-                                  className="flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg text-xs font-semibold transition-colors"
-                                >
-                                  <Boxes className="w-3 h-3" />
-                                  <span>Restock</span>
-                                </button>
+                                {onRestockClick && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onRestockClick(p)}
+                                    title="1-Click Restock with Supplier (Owner / CEO)"
+                                    className="flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg text-xs font-semibold transition-colors"
+                                  >
+                                    <Boxes className="w-3 h-3" />
+                                    <span>Restock</span>
+                                  </button>
+                                )}
 
                                 <button
                                   type="button"

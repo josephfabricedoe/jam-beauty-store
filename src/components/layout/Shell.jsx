@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { useAuth } from '../../hooks/useAuth';
 import Sidebar from './Sidebar';
@@ -31,8 +32,10 @@ import {
   Users, 
   Truck, 
   UserCog, 
-  Settings 
+  Settings,
+  Lock
 } from 'lucide-react';
+import { canAccessModule, normalizeRole, getDefaultModuleForRole, ROLE_DEFINITIONS } from '../../utils/rbac';
 
 const MODULE_VIEWS = {
   pos:        POSView,
@@ -61,30 +64,38 @@ const MODULE_LABELS = {
 };
 
 const ALL_MOBILE_MODULES = [
-  { id: 'pos',        label: 'Point of Sale',     icon: ShoppingCart,    adminOnly: false },
-  { id: 'marketing',  label: 'WhatsApp Marketing', icon: MessageCircle,   adminOnly: false },
-  { id: 'customers',  label: 'Customers & VIP',   icon: HeartHandshake,  adminOnly: false },
-  { id: 'inventory',  label: 'Inventory Stock',   icon: Package,         adminOnly: true },
-  { id: 'suppliers',  label: 'Suppliers & Restock', icon: Building2,      adminOnly: true },
-  { id: 'finance',    label: 'Finance & Reports',  icon: BarChart3,       adminOnly: true },
-  { id: 'delivery',   label: 'Delivery Logistics', icon: Truck,           adminOnly: false },
-  { id: 'attendance', label: 'Staff Attendance',  icon: Users,           adminOnly: false },
-  { id: 'staff',      label: 'Staff Management',   icon: UserCog,         adminOnly: true },
-  { id: 'settings',   label: 'Store Settings',     icon: Settings,        adminOnly: true },
+  { id: 'pos',        label: 'Point of Sale',          icon: ShoppingCart },
+  { id: 'delivery',   label: 'Delivery Logistics',      icon: Truck },
+  { id: 'attendance', label: 'Staff Attendance',        icon: Users },
+  { id: 'customers',  label: 'Customers & VIP',         icon: HeartHandshake },
+  { id: 'inventory',  label: 'Inventory Stock',         icon: Package },
+  { id: 'finance',    label: 'Finance & Reports',       icon: BarChart3 },
+  { id: 'marketing',  label: 'WhatsApp Marketing',      icon: MessageCircle },
+  { id: 'suppliers',  label: 'Suppliers & Restock',     icon: Building2 },
+  { id: 'staff',      label: 'Staff Management',        icon: UserCog },
+  { id: 'settings',   label: 'Store Settings',          icon: Settings },
 ];
-
-const ADMIN_ONLY_MODULES = ['inventory', 'suppliers', 'finance', 'staff', 'settings'];
 
 export default function Shell({ onGoToCatalog }) {
   const { activeModule, setActiveModule } = useApp();
   const { userProfile, signOut } = useAuth();
-  const isAdmin = userProfile?.role === 'admin';
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
-  let ActiveView = MODULE_VIEWS[activeModule] || POSView;
+  const userRole = normalizeRole(userProfile?.role);
+  const roleDef = ROLE_DEFINITIONS[userRole] || ROLE_DEFINITIONS.cashier;
+  const isBlocked = !canAccessModule(userRole, activeModule);
 
-  // Protect Admin-Only modules
-  const isBlocked = ADMIN_ONLY_MODULES.includes(activeModule) && !isAdmin;
+  // Auto-redirect if user opens or is on a restricted module
+  useEffect(() => {
+    if (!canAccessModule(userRole, activeModule)) {
+      const defaultMod = getDefaultModuleForRole(userRole);
+      if (activeModule !== defaultMod) {
+        setActiveModule(defaultMod);
+      }
+    }
+  }, [userRole, activeModule, setActiveModule]);
+
+  let ActiveView = MODULE_VIEWS[activeModule] || POSView;
 
   return (
     <div className="flex h-screen bg-slate-900 overflow-hidden">
@@ -106,10 +117,15 @@ export default function Shell({ onGoToCatalog }) {
             className="w-8 h-8 rounded-full object-cover border border-[#efaa9b]/60 flex-shrink-0"
           />
           <div className="flex-1 min-w-0">
-            <h1 className="text-base font-bold text-white truncate">
-              {MODULE_LABELS[activeModule] || 'JAM Beauty'}
-            </h1>
-            <p className="text-[11px] text-[#efaa9b] font-medium hidden sm:block">JAM Beauty Store · Official POS</p>
+            <div className="flex items-center gap-2">
+              <h1 className="text-base font-bold text-white truncate">
+                {MODULE_LABELS[activeModule] || 'JAM Beauty'}
+              </h1>
+              <span className={`hidden sm:inline-flex text-[10px] px-2 py-0.5 rounded-full font-bold border ${roleDef.badgeColor}`}>
+                {roleDef.badge}
+              </span>
+            </div>
+            <p className="text-[11px] text-[#efaa9b] font-medium hidden sm:block">JAM Beauty Store · Official Operations</p>
           </div>
           
           {onGoToCatalog && (
@@ -142,15 +158,20 @@ export default function Shell({ onGoToCatalog }) {
               <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-4">
                 <ShieldAlert className="w-8 h-8 text-amber-400" />
               </div>
-              <h2 className="text-lg font-bold text-white mb-1">Administrator Access Only</h2>
-              <p className="text-slate-400 text-sm max-w-md mb-6">
-                Inventory adjustments, financial metrics, and settings are restricted to manager and admin accounts.
+              <h2 className="text-lg font-bold text-white mb-1">Restricted Access Module</h2>
+              <p className="text-slate-400 text-sm max-w-md mb-2">
+                This section is protected by store confidentiality rules and is not accessible with your current authority level ({roleDef.badge}).
+              </p>
+              <p className="text-xs text-amber-300/80 mb-6">
+                {activeModule === 'suppliers' || activeModule === 'settings' || activeModule === 'staff'
+                  ? '🔒 Requires Level 4: Owner / CEO clearance.'
+                  : '🔒 Requires Level 3: Store Manager or Level 4: Owner clearance.'}
               </p>
               <button
-                onClick={() => setActiveModule('pos')}
-                className="px-5 py-2.5 bg-rose-500 hover:bg-rose-400 text-white rounded-xl text-sm font-semibold transition-colors"
+                onClick={() => setActiveModule(getDefaultModuleForRole(userRole))}
+                className="px-5 py-2.5 bg-rose-500 hover:bg-rose-400 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-rose-500/25"
               >
-                Return to Point of Sale
+                Return to {MODULE_LABELS[getDefaultModuleForRole(userRole)]}
               </button>
             </div>
           ) : (
@@ -193,7 +214,7 @@ export default function Shell({ onGoToCatalog }) {
             </div>
 
             <div className="flex-1 py-3 space-y-1 overflow-y-auto">
-              {ALL_MOBILE_MODULES.filter(m => !m.adminOnly || isAdmin).map(item => {
+              {ALL_MOBILE_MODULES.filter(m => canAccessModule(userRole, m.id)).map(item => {
                 const Icon = item.icon;
                 const active = activeModule === item.id;
                 return (
@@ -223,7 +244,9 @@ export default function Shell({ onGoToCatalog }) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-white truncate">{userProfile?.displayName || userProfile?.email}</p>
-                  <p className="text-[11px] text-slate-500 capitalize">{userProfile?.role}</p>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold border block mt-0.5 w-fit ${roleDef.badgeColor}`}>
+                    {roleDef.badge}
+                  </span>
                 </div>
               </div>
               <button

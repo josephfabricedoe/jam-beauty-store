@@ -61,13 +61,15 @@ export default function StoreroomTable({ onTransferClick, onRestockClick }) {
                     <ArrowRight className="w-3 h-3" /> Transfer
                   </button>
 
-                  <button
-                    onClick={() => onRestockClick ? onRestockClick(p) : null}
-                    title="Order Restock from Supplier"
-                    className="flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg text-xs font-semibold transition-colors"
-                  >
-                    <Boxes className="w-3 h-3" /> Restock
-                  </button>
+                  {onRestockClick && (
+                    <button
+                      onClick={() => onRestockClick(p)}
+                      title="Order Restock from Supplier (Owner / CEO)"
+                      className="flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg text-xs font-semibold transition-colors"
+                    >
+                      <Boxes className="w-3 h-3" /> Restock
+                    </button>
+                  )}
                 </div>
               </td>
             </tr>

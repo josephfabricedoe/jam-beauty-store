@@ -6,9 +6,12 @@ import ClockInMobile from './ClockInMobile';
 import TimesheetAdmin from './TimesheetAdmin';
 import { UserCheck, FileText, Clock, ShieldCheck } from 'lucide-react';
 
+import { normalizeRole } from '../../utils/rbac';
+
 export default function AttendanceView() {
   const { userProfile } = useAuth();
-  const isAdmin = userProfile?.role === 'admin';
+  const role = normalizeRole(userProfile?.role);
+  const canManageAttendance = role === 'owner' || role === 'manager';
   const [activeTab, setActiveTab] = useState('timesheet'); // 'timesheet' | 'kiosk'
   const [staffList, setStaffList] = useState([]);
 
@@ -23,8 +26,8 @@ export default function AttendanceView() {
     return unsub;
   }, []);
 
-  // For non-admin staff: streamlined mobile clock-in only
-  if (!isAdmin) {
+  // For Delivery and Cashier: streamlined clock-in only
+  if (!canManageAttendance) {
     return (
       <div className="p-4 max-w-lg mx-auto">
         <div className="text-center mb-4">

@@ -4,6 +4,7 @@ import { db } from '../../firebase/config';
 import { useAuth } from '../../hooks/useAuth';
 import StaffForm from './StaffForm';
 import { UserPlus, Edit2, UserCheck, UserX, Shield, Users } from 'lucide-react';
+import { ROLE_DEFINITIONS, normalizeRole } from '../../utils/rbac';
 
 export default function StaffView() {
   const [staff, setStaff] = useState([]);
@@ -33,41 +34,39 @@ export default function StaffView() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold text-white">Staff Management</h2>
-          <p className="text-xs text-slate-500">{staff.length} team member{staff.length !== 1 ? 's' : ''}</p>
+          <h2 className="text-lg font-semibold text-white">Staff & Clearance Management</h2>
+          <p className="text-xs text-slate-400">Manage store authority, roles, PINs, and shift schedules ({staff.length} staff)</p>
         </div>
         <button onClick={() => setAddOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-2 bg-rose-500 hover:bg-rose-400 text-white rounded-xl text-sm font-medium transition-colors shadow-lg shadow-rose-500/20">
-          <UserPlus className="w-4 h-4" /> Add Staff
+          className="flex items-center gap-1.5 px-3.5 py-2 bg-rose-500 hover:bg-rose-400 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-rose-500/20">
+          <UserPlus className="w-4 h-4" /> Add Team Member
         </button>
       </div>
 
       {loading ? <p className="text-slate-500 text-sm">Loading...</p> : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-          {staff.map(member => (
-            <div key={member.id} className={`bg-slate-800/50 border rounded-2xl p-4 transition-opacity ${
-              member.active === false ? 'opacity-50 border-slate-800' : 'border-slate-700 hover:border-slate-600'
-            }`}>
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-amber-400 flex items-center justify-center flex-shrink-0">
-                    <span className="text-sm font-bold text-white">
-                      {(member.displayName || member.email || 'U')[0].toUpperCase()}
-                    </span>
+          {staff.map(member => {
+            const roleDef = ROLE_DEFINITIONS[normalizeRole(member.role)] || ROLE_DEFINITIONS.cashier;
+            return (
+              <div key={member.id} className={`bg-slate-800/50 border rounded-2xl p-4 transition-opacity ${
+                member.active === false ? 'opacity-50 border-slate-800' : 'border-slate-700 hover:border-slate-600'
+              }`}>
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-400 to-amber-400 flex items-center justify-center flex-shrink-0">
+                      <span className="text-sm font-bold text-white">
+                        {(member.displayName || member.email || 'U')[0].toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-white text-sm truncate">{member.displayName || '—'}</p>
+                      <p className="text-xs text-slate-500 truncate">{member.email}</p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="font-medium text-white text-sm truncate">{member.displayName || '—'}</p>
-                    <p className="text-xs text-slate-500 truncate">{member.email}</p>
-                  </div>
+                  <span className={`text-[11px] px-2.5 py-1 rounded-full border font-bold flex-shrink-0 ${roleDef.badgeColor}`}>
+                    {roleDef.badge}
+                  </span>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded-full border font-medium flex-shrink-0 ${
-                  member.role === 'admin'
-                    ? 'bg-rose-900/50 text-rose-300 border-rose-700/50'
-                    : 'bg-slate-700 text-slate-300 border-slate-600'
-                }`}>
-                  {member.role === 'admin' ? <span className="flex items-center gap-1"><Shield className="w-3 h-3" />Admin</span> : 'Staff'}
-                </span>
-              </div>
 
               {/* Pay & Shift Details */}
               <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-900/40 border border-slate-700/50 rounded-xl px-3 py-2 my-2">
@@ -102,7 +101,8 @@ export default function StaffView() {
                 )}
               </div>
             </div>
-          ))}
+          );
+        })}
           {staff.length === 0 && (
             <div className="col-span-3 text-center py-12 text-slate-500">
               <Users className="w-10 h-10 mx-auto mb-2 opacity-40" />

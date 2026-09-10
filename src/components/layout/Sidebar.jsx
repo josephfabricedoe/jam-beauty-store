@@ -1,22 +1,37 @@
 import React from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { useAuth } from '../../hooks/useAuth';
-import { ShoppingCart, Package, BarChart3, Users, Truck, Sparkles, ChevronLeft, LogOut, Settings, UserCog, HeartHandshake, Building2, MessageCircle } from 'lucide-react';
+import { 
+  ShoppingCart, 
+  Package, 
+  BarChart3, 
+  Users, 
+  Truck, 
+  Sparkles, 
+  ChevronLeft, 
+  LogOut, 
+  Settings, 
+  UserCog, 
+  HeartHandshake, 
+  Building2, 
+  MessageCircle 
+} from 'lucide-react';
+import { canAccessModule, normalizeRole, ROLE_DEFINITIONS } from '../../utils/rbac';
 
 const NAV_ITEMS = [
-  { id: 'pos',        label: 'Point of Sale',     icon: ShoppingCart,    roles: ['admin', 'staff'] },
-  { id: 'inventory',  label: 'Inventory',          icon: Package,         roles: ['admin'] }, // ADMIN ONLY
-  { id: 'suppliers',  label: 'Suppliers & Restock', icon: Building2,      roles: ['admin'] }, // ADMIN ONLY
-  { id: 'marketing',  label: 'WhatsApp Marketing', icon: MessageCircle,   roles: ['admin', 'staff'] },
-  { id: 'finance',    label: 'Finance & Reports',  icon: BarChart3,       roles: ['admin'] },
-  { id: 'customers',  label: 'Customers & VIP Accounts', icon: HeartHandshake,  roles: ['admin', 'staff'] },
-  { id: 'attendance', label: 'Attendance',         icon: Users,           roles: ['admin', 'staff'] },
-  { id: 'delivery',   label: 'Delivery',           icon: Truck,           roles: ['admin', 'staff'] },
-  { id: 'staff',      label: 'Staff Management',   icon: UserCog,         roles: ['admin'] },
+  { id: 'pos',        label: 'Point of Sale',          icon: ShoppingCart },
+  { id: 'inventory',  label: 'Inventory',               icon: Package },
+  { id: 'suppliers',  label: 'Suppliers & Restock',     icon: Building2 }, // OWNER/CEO ONLY
+  { id: 'marketing',  label: 'WhatsApp Marketing',      icon: MessageCircle },
+  { id: 'finance',    label: 'Finance & Reports',       icon: BarChart3 },
+  { id: 'customers',  label: 'Customers & VIP Accounts', icon: HeartHandshake },
+  { id: 'delivery',   label: 'Delivery Logistics',      icon: Truck },
+  { id: 'attendance', label: 'Attendance',              icon: Users },
+  { id: 'staff',      label: 'Staff Management',        icon: UserCog }, // OWNER/CEO ONLY
 ];
 
 const BOTTOM_ITEMS = [
-  { id: 'settings',   label: 'Settings',          icon: Settings,     roles: ['admin'] },
+  { id: 'settings',   label: 'Settings',               icon: Settings }, // OWNER/CEO ONLY
 ];
 
 function NavButton({ id, label, icon: Icon, active, isOpen, onClick }) {
@@ -38,10 +53,11 @@ function NavButton({ id, label, icon: Icon, active, isOpen, onClick }) {
 export default function Sidebar() {
   const { activeModule, setActiveModule, isSidebarOpen, toggleSidebar } = useApp();
   const { userProfile, signOut } = useAuth();
-  const role = userProfile?.role || 'staff';
+  const role = normalizeRole(userProfile?.role);
+  const roleDef = ROLE_DEFINITIONS[role] || ROLE_DEFINITIONS.cashier;
 
-  const filtered = NAV_ITEMS.filter(i => i.roles.includes(role));
-  const bottomFiltered = BOTTOM_ITEMS.filter(i => i.roles.includes(role));
+  const filtered = NAV_ITEMS.filter(i => canAccessModule(role, i.id));
+  const bottomFiltered = BOTTOM_ITEMS.filter(i => canAccessModule(role, i.id));
 
   return (
     <aside className={`hidden md:flex flex-col bg-slate-900 border-r border-slate-800 transition-all duration-300 ${isSidebarOpen ? 'w-56' : 'w-16'}`}>
@@ -103,7 +119,9 @@ export default function Sidebar() {
           {isSidebarOpen && (
             <div className="min-w-0">
               <p className="text-xs font-medium text-white truncate">{userProfile?.displayName || userProfile?.email}</p>
-              <p className="text-xs text-slate-500 capitalize">{userProfile?.role}</p>
+              <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold border block mt-0.5 w-fit ${roleDef.badgeColor}`}>
+                {roleDef.badge}
+              </span>
             </div>
           )}
         </div>
