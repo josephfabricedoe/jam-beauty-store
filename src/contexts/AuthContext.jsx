@@ -3,7 +3,16 @@ import { onAuthStateChanged, signInWithEmailAndPassword, signOut as fbSignOut, c
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 
-import { normalizeRole, isOwner, isManager, isCashier, isDelivery } from '../utils/rbac';
+import { 
+  normalizeRole, 
+  isOwner, 
+  isManager, 
+  isCashier, 
+  isDelivery, 
+  isOwnerEmail, 
+  OWNER_EMAILS, 
+  SHARED_TERMINAL_EMAIL 
+} from '../utils/rbac';
 
 const AuthContext = createContext(null);
 
@@ -27,17 +36,25 @@ export function AuthProvider({ children }) {
       clearTimeout(fallbackTimer);
 
       if (user) {
+        const isExplicitOwner = isOwnerEmail(user.email);
+        const ownerName = user.email?.toLowerCase().includes('joseph') ? 'Joseph Doe' : 'Malydia Jasay';
+
         getDoc(doc(db, 'users', user.uid))
           .then(async (snap) => {
             if (!mounted) return;
             if (snap.exists()) {
-              setUserProfile(snap.data());
+              const data = snap.data();
+              if (isExplicitOwner) {
+                setUserProfile({ ...data, role: 'owner', displayName: data.displayName || ownerName });
+              } else {
+                setUserProfile(data);
+              }
             } else {
               const defaultProfile = {
                 uid: user.uid,
                 email: user.email,
-                displayName: user.displayName || user.email?.split('@')[0] || 'Store Admin',
-                role: 'owner',
+                displayName: isExplicitOwner ? ownerName : (user.displayName || user.email?.split('@')[0] || 'Store User'),
+                role: isExplicitOwner ? 'owner' : 'cashier',
                 createdAt: serverTimestamp(),
               };
               try {
@@ -50,7 +67,13 @@ export function AuthProvider({ children }) {
           })
           .catch((e) => {
             console.warn('Profile fetch notice:', e);
-            if (mounted) setUserProfile({ role: 'owner', displayName: user.email });
+            if (mounted) {
+              setUserProfile({
+                role: isExplicitOwner ? 'owner' : 'cashier',
+                displayName: isExplicitOwner ? ownerName : user.email,
+                email: user.email
+              });
+            }
           });
       } else {
         setUserProfile(null);
@@ -63,8 +86,6 @@ export function AuthProvider({ children }) {
       unsub();
     };
   }, []);
-
-  const SHARED_TERMINAL_EMAIL = 'jambeautyliberia@gmail.com';
 
   const [terminalStaff, setTerminalStaff] = useState(() => {
     try {

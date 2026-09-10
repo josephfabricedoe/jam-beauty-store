@@ -14,8 +14,21 @@ export const ROLES = {
   OWNER: 'owner',
 };
 
+export const OWNER_EMAILS = [
+  'jambeautystorelib@gmail.com', // Malydia Jasay (Owner / CEO)
+  'josephfabricedoe@gmail.com',  // Joseph Doe (Owner / CEO)
+];
+
+export const SHARED_TERMINAL_EMAIL = 'jambeautyliberia@gmail.com';
+
+export function isOwnerEmail(email) {
+  if (!email) return false;
+  return OWNER_EMAILS.includes(String(email).toLowerCase().trim());
+}
+
 // Normalize legacy roles ('admin' -> 'owner', 'staff' -> 'cashier')
-export function normalizeRole(role) {
+export function normalizeRole(role, email = null) {
+  if (email && isOwnerEmail(email)) return 'owner';
   if (!role) return 'cashier';
   const r = String(role).toLowerCase().trim();
   if (r === 'admin' || r === 'owner' || r === 'ceo' || r === 'superadmin') return 'owner';
