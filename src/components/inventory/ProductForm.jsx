@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Modal from '../shared/Modal';
-import { doc, setDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, serverTimestamp, collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { Save, Trash2, AlertCircle, Barcode, Camera, Image as ImageIcon, X } from 'lucide-react';
+import { Save, Trash2, AlertCircle, Barcode, Camera, Image as ImageIcon, X, Building2 } from 'lucide-react';
 import BarcodeScannerModal from '../shared/BarcodeScannerModal';
 
 const CATEGORIES = ['Perfume', 'Cosmetics', 'Skincare', 'Haircare', 'Accessories', 'Body Care', 'Other'];
@@ -13,6 +13,8 @@ export default function ProductForm({ isOpen, onClose, editProduct = null }) {
   const [barcode, setBarcode] = useState('');
   const [name, setName] = useState('');
   const [category, setCategory] = useState('Perfume');
+  const [supplierId, setSupplierId] = useState('');
+  const [suppliersList, setSuppliersList] = useState([]);
   const [retailPrice, setRetailPrice] = useState('');
   const [halfDozenPrice, setHalfDozenPrice] = useState('');
   const [dozenPrice, setDozenPrice] = useState('');
@@ -32,10 +34,15 @@ export default function ProductForm({ isOpen, onClose, editProduct = null }) {
   // Re-sync form state whenever editProduct or isOpen changes
   useEffect(() => {
     if (isOpen) {
+      getDocs(collection(db, 'suppliers')).then(snap => {
+        setSuppliersList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      }).catch(err => console.warn('Could not fetch suppliers:', err));
+
       if (editProduct) {
         setBarcode(editProduct.barcode || editProduct.id || '');
         setName(editProduct.name || '');
         setCategory(editProduct.category || 'Perfume');
+        setSupplierId(editProduct.supplierId || '');
         setRetailPrice(editProduct.retailPrice != null ? String(editProduct.retailPrice) : '');
         setHalfDozenPrice(editProduct.halfDozenPrice != null ? String(editProduct.halfDozenPrice) : '');
         setDozenPrice(editProduct.dozenPrice != null ? String(editProduct.dozenPrice) : '');
@@ -48,6 +55,7 @@ export default function ProductForm({ isOpen, onClose, editProduct = null }) {
         setBarcode('');
         setName('');
         setCategory('Perfume');
+        setSupplierId('');
         setRetailPrice('');
         setHalfDozenPrice('');
         setDozenPrice('');
@@ -118,10 +126,13 @@ export default function ProductForm({ isOpen, onClose, editProduct = null }) {
     setError('');
 
     try {
+      const selectedSupplier = suppliersList.find(s => s.id === supplierId);
       const payload = {
         barcode: cleanBarcode,
         name: cleanName,
         category,
+        supplierId: supplierId || null,
+        supplierName: selectedSupplier?.name || null,
         retailPrice: parseFloat(retailPrice) || 0,
         halfDozenPrice: parseFloat(halfDozenPrice) || 0,
         dozenPrice: parseFloat(dozenPrice) || 0,
@@ -257,6 +268,23 @@ export default function ProductForm({ isOpen, onClose, editProduct = null }) {
             >
               {CATEGORIES.map(c => (
                 <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center gap-1">
+              <Building2 className="w-3.5 h-3.5 text-rose-400" />
+              Primary Supplier
+            </label>
+            <select
+              value={supplierId}
+              onChange={e => setSupplierId(e.target.value)}
+              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-rose-400 focus:ring-1 focus:ring-rose-400"
+            >
+              <option value="">(None / General Supplier)</option>
+              {suppliersList.map(s => (
+                <option key={s.id} value={s.id}>{s.name} ({s.code || 'SUP'})</option>
               ))}
             </select>
           </div>

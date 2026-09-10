@@ -71,6 +71,19 @@ service cloud.firestore {
       allow write: if isAuthenticated();
     }
 
+    // Suppliers & Restock Orders
+    match /suppliers/{supplierId} {
+      allow read, write: if isAuthenticated();
+    }
+    match /restockOrders/{orderId} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Marketing Campaigns & Broadcasts
+    match /marketingCampaigns/{campaignId} {
+      allow read, write: if isAuthenticated();
+    }
+
     // Fallback: allow authenticated store users read/write
     match /{document=**} {
       allow read, write: if isAuthenticated();

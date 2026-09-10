@@ -1,14 +1,14 @@
 import React from 'react';
 import { useApp } from '../../contexts/AppContext';
 import { useAuth } from '../../hooks/useAuth';
-import { ShoppingCart, Package, BarChart3, Users, Truck, HeartHandshake } from 'lucide-react';
+import { ShoppingCart, Package, BarChart3, Users, Truck, HeartHandshake, MessageCircle, Building2 } from 'lucide-react';
 
 const ALL_NAV_ITEMS = [
   { id: 'pos',        label: 'POS',       icon: ShoppingCart,    adminOnly: false },
+  { id: 'marketing',  label: 'Marketing', icon: MessageCircle,   adminOnly: false },
   { id: 'customers',  label: 'VIP Accts', icon: HeartHandshake,  adminOnly: false },
-  { id: 'attendance', label: 'Staff',     icon: Users,           adminOnly: false },
-  { id: 'delivery',   label: 'Delivery',  icon: Truck,           adminOnly: false },
   { id: 'inventory',  label: 'Stock',     icon: Package,         adminOnly: true },
+  { id: 'suppliers',  label: 'Suppliers', icon: Building2,       adminOnly: true },
   { id: 'finance',    label: 'Finance',   icon: BarChart3,       adminOnly: true },
 ];
 
