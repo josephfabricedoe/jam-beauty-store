@@ -164,7 +164,9 @@ export default function RestockOrderModal({
         const totalStock = (p.showroomQty || 0) + (p.storeroomQty || 0);
         const isLow = totalStock <= (p.reorderTrigger || 10);
         if (matchedSupplier) {
-          return p.supplierId === matchedSupplier.id || (isLow && !p.supplierId);
+          const matchSupp = (matchedSupplier.id && p.supplierId === matchedSupplier.id) ||
+            (matchedSupplier.name && p.supplierName && p.supplierName.trim().toLowerCase() === matchedSupplier.name.trim().toLowerCase());
+          return matchSupp && isLow;
         }
         return isLow;
       });
@@ -229,7 +231,7 @@ export default function RestockOrderModal({
     const storeQty = p.storeroomQty || 0;
     const totStock = showQty + storeQty;
     const trig = p.reorderTrigger || 10;
-    const suggestedQty = Math.max(12, (trig * 2) - totStock);
+    const suggestedQty = totStock <= trig ? Math.max(12, (trig * 2) - totStock) : Math.max(12, trig);
 
     setItems(prev => [
       ...prev,
@@ -251,6 +253,7 @@ export default function RestockOrderModal({
       const storeQty = p.storeroomQty || 0;
       const totStock = showQty + storeQty;
       const trig = p.reorderTrigger || 10;
+      const suggestedQty = totStock <= trig ? Math.max(12, (trig * 2) - totStock) : Math.max(12, trig);
       return {
         productId: p.id,
         name: p.name,
@@ -258,7 +261,7 @@ export default function RestockOrderModal({
         currentStock: totStock,
         reorderTrigger: trig,
         costPrice: p.costPrice != null ? Number(p.costPrice) : 0,
-        orderQty: Math.max(12, (trig * 2) - totStock),
+        orderQty: suggestedQty,
       };
     });
     setItems(prev => [...prev, ...newItems]);
@@ -561,43 +564,49 @@ export default function RestockOrderModal({
 
         {/* 1-CLICK SAME SUPPLIER PRODUCTS BUNDLING */}
         {sameSupplierProducts.length > 0 && (
-          <div className="p-3 bg-rose-950/20 border border-rose-500/40 rounded-2xl space-y-2">
+          <div className="p-3.5 bg-slate-900/90 border border-slate-700/80 rounded-2xl space-y-2.5">
             <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-1.5 font-bold text-rose-300 text-xs">
+              <div className="flex items-center gap-1.5 font-bold text-white text-xs">
                 <Boxes className="w-4 h-4 text-rose-400" />
-                <span>Other Products from {activeSupplier?.name || targetProduct?.supplierName} ({sameSupplierProducts.length})</span>
+                <span>
+                  Other Products from {activeSupplier?.name || targetProduct?.supplierName} (Healthy Stock / Not Low) ({sameSupplierProducts.length})
+                </span>
               </div>
               <button
                 type="button"
                 onClick={() => handleAddAllSupplierProducts(sameSupplierProducts)}
-                className="px-2.5 py-1 bg-rose-500 hover:bg-rose-400 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shadow-sm"
+                className="px-2.5 py-1 bg-slate-800 hover:bg-rose-500 text-slate-200 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700 hover:border-rose-500 shadow-sm"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add All ({sameSupplierProducts.length}) to Restock</span>
               </button>
             </div>
             <p className="text-[11px] text-slate-400">
-              Bundle items from the same supplier to ship together and minimize freight handling:
+              These products are currently above their reorder triggers. Click <strong>"+ Add"</strong> on any item to include it in this supplier shipment:
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
-              {sameSupplierProducts.map(p => (
-                <div key={p.id} className="p-2 bg-slate-900/80 border border-slate-800 rounded-xl flex items-center justify-between gap-2">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-white font-medium text-xs truncate">{p.name}</div>
-                    <div className="text-[10px] text-slate-400 flex items-center gap-2">
-                      <span>Stock: {(p.showroomQty || 0) + (p.storeroomQty || 0)}</span>
-                      <span>Cost: {format(p.costPrice || 0)}</span>
+              {sameSupplierProducts.map(p => {
+                const totStock = (p.showroomQty || 0) + (p.storeroomQty || 0);
+                return (
+                  <div key={p.id} className="p-2 bg-slate-800/80 border border-slate-700/70 rounded-xl flex items-center justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="text-white font-medium text-xs truncate">{p.name}</div>
+                      <div className="text-[10px] text-slate-400 flex items-center gap-1.5 mt-0.5">
+                        <span className="text-emerald-400 font-medium">Stock: {totStock}</span>
+                        <span>·</span>
+                        <span>Cost: {format(p.costPrice || 0)}</span>
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => handleAddProduct(p.id)}
+                      className="px-2 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-0.5 flex-shrink-0 transition-colors"
+                    >
+                      <Plus className="w-3 h-3" /> Add
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => handleAddProduct(p.id)}
-                    className="px-2 py-1 bg-slate-800 hover:bg-rose-500 text-slate-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-0.5 flex-shrink-0 transition-colors"
-                  >
-                    <Plus className="w-3 h-3" /> Add
-                  </button>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -643,8 +652,15 @@ export default function RestockOrderModal({
               <tbody className="divide-y divide-slate-800">
                 {items.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-center text-slate-500">
-                      No items selected. Select a product above.
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-400">
+                      {activeSupplier ? (
+                        <div className="space-y-1">
+                          <p className="font-bold text-emerald-400 text-sm">✨ All items from {activeSupplier.name} are currently above restock levels!</p>
+                          <p className="text-xs text-slate-400">You can select products from {activeSupplier.name} in the section above to order ahead.</p>
+                        </div>
+                      ) : (
+                        'No items selected. Select a product above.'
+                      )}
                     </td>
                   </tr>
                 ) : (

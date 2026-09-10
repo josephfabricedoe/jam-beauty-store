@@ -17,6 +17,7 @@ export default function FactoryResetModal({ isOpen, onClose }) {
   const [wipeAttendance, setWipeAttendance] = useState(true);
   const [wipeDeliveries, setWipeDeliveries] = useState(true);
   const [wipeCustomers, setWipeCustomers] = useState(true);
+  const [wipeSuppliers, setWipeSuppliers] = useState(true);
   const [wipeProducts, setWipeProducts] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -89,6 +90,11 @@ export default function FactoryResetModal({ isOpen, onClose }) {
       if (wipeCustomers) {
         await deleteCollectionDocs('customers');
         await deleteCollectionDocs('customerTransactions');
+      }
+
+      if (wipeSuppliers) {
+        await deleteCollectionDocs('suppliers');
+        await deleteCollectionDocs('restockOrders');
       }
 
       if (wipeProducts) {
@@ -235,6 +241,16 @@ export default function FactoryResetModal({ isOpen, onClose }) {
                   className="rounded border-slate-600 text-red-500 focus:ring-red-500"
                 />
                 <span>Delivery Logs</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={wipeSuppliers}
+                  onChange={e => setWipeSuppliers(e.target.checked)}
+                  className="rounded border-slate-600 text-red-500 focus:ring-red-500"
+                />
+                <span>Suppliers & Restock Orders</span>
               </label>
 
               <label className="flex items-center gap-2 text-amber-300 cursor-pointer col-span-1 sm:col-span-2 pt-1 border-t border-slate-700/60">
