@@ -14,7 +14,8 @@ import {
   UserCog, 
   HeartHandshake, 
   Building2, 
-  MessageCircle 
+  MessageCircle,
+  Lock
 } from 'lucide-react';
 import { canAccessModule, normalizeRole, ROLE_DEFINITIONS } from '../../utils/rbac';
 
@@ -52,7 +53,7 @@ function NavButton({ id, label, icon: Icon, active, isOpen, onClick }) {
 
 export default function Sidebar() {
   const { activeModule, setActiveModule, isSidebarOpen, toggleSidebar } = useApp();
-  const { userProfile, signOut } = useAuth();
+  const { userProfile, signOut, isSharedTerminal, lockTerminalStaff } = useAuth();
   const role = normalizeRole(userProfile?.role);
   const roleDef = ROLE_DEFINITIONS[role] || ROLE_DEFINITIONS.cashier;
 
@@ -125,6 +126,17 @@ export default function Sidebar() {
             </div>
           )}
         </div>
+
+        {isSharedTerminal && (
+          <button
+            onClick={lockTerminalStaff}
+            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 transition-colors ${!isSidebarOpen ? 'justify-center' : ''}`}
+            title="Lock register and switch staff member PIN"
+          >
+            <Lock className="w-4 h-4 flex-shrink-0 text-amber-400" />
+            {isSidebarOpen && <span>Switch Staff / Lock</span>}
+          </button>
+        )}
 
         <button
           onClick={signOut}

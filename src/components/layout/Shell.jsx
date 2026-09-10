@@ -17,6 +17,7 @@ import StaffView from '../staff/StaffView';
 import SettingsView from '../settings/SettingsView';
 import CustomerAccountsView from '../customers/CustomerAccountsView';
 import PwaInstallPrompt from '../shared/PwaInstallPrompt';
+import TerminalPinModal from '../auth/TerminalPinModal';
 import { 
   LogOut, 
   ShieldAlert, 
@@ -78,7 +79,14 @@ const ALL_MOBILE_MODULES = [
 
 export default function Shell({ onGoToCatalog }) {
   const { activeModule, setActiveModule } = useApp();
-  const { userProfile, signOut } = useAuth();
+  const { 
+    userProfile, 
+    signOut, 
+    isSharedTerminal, 
+    isTerminalLocked, 
+    lockTerminalStaff, 
+    terminalStaff 
+  } = useAuth();
   const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
 
   const userRole = normalizeRole(userProfile?.role);
@@ -137,6 +145,19 @@ export default function Shell({ onGoToCatalog }) {
             >
               <ShoppingBag className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">Storefront</span>
+            </button>
+          )}
+
+          {isSharedTerminal && (
+            <button
+              type="button"
+              onClick={lockTerminalStaff}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-xl text-xs font-bold transition-all shadow-sm"
+              title="Lock register and switch staff member PIN"
+            >
+              <Lock className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Switch Staff</span>
+              <span className="sm:hidden">Lock</span>
             </button>
           )}
 
@@ -249,6 +270,20 @@ export default function Shell({ onGoToCatalog }) {
                   </span>
                 </div>
               </div>
+              {isSharedTerminal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileDrawerOpen(false);
+                    lockTerminalStaff();
+                  }}
+                  className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 transition-colors font-medium"
+                >
+                  <Lock className="w-4 h-4 text-amber-400" />
+                  <span>Switch Staff / Lock</span>
+                </button>
+              )}
+
               <button
                 onClick={signOut}
                 className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-slate-400 hover:text-red-400 hover:bg-red-950/30 transition-colors"
@@ -260,6 +295,9 @@ export default function Shell({ onGoToCatalog }) {
           </div>
         </div>
       )}
+
+      {/* Terminal PIN Kiosk Modal */}
+      <TerminalPinModal isOpen={isTerminalLocked} />
     </div>
   );
 }

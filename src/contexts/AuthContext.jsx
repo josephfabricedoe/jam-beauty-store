@@ -64,9 +64,43 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  const SHARED_TERMINAL_EMAIL = 'jambeautyliberia@gmail.com';
+
+  const [terminalStaff, setTerminalStaff] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('jam_terminal_staff');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  const isSharedTerminal = currentUser?.email?.toLowerCase().trim() === SHARED_TERMINAL_EMAIL;
+
+  // Terminal is locked ONLY if logged into shared store account AND no individual staff PIN is active
+  // Joseph, CEO MJ, and direct admin logins bypass this completely!
+  const isTerminalLocked = isSharedTerminal && !terminalStaff;
+
+  const unlockTerminalStaff = (staff) => {
+    setTerminalStaff(staff);
+    try {
+      sessionStorage.setItem('jam_terminal_staff', JSON.stringify(staff));
+    } catch (e) {}
+  };
+
+  const lockTerminalStaff = () => {
+    setTerminalStaff(null);
+    try {
+      sessionStorage.removeItem('jam_terminal_staff');
+    } catch (e) {}
+  };
+
   const signIn = (email, password) => signInWithEmailAndPassword(auth, email, password);
 
-  const signOut = () => fbSignOut(auth);
+  const signOut = () => {
+    lockTerminalStaff();
+    return fbSignOut(auth);
+  };
 
   const createAccount = async (email, password, displayName, role = 'cashier') => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -81,12 +115,22 @@ export function AuthProvider({ children }) {
     return cred;
   };
 
-  const currentRole = normalizeRole(userProfile?.role);
+  // Resolve active staff profile and role:
+  // On shared terminal, active staff member unlocked via PIN takes precedence
+  // On personal owner/admin login, userProfile takes precedence
+  const effectiveProfile = isSharedTerminal ? (terminalStaff || { displayName: 'Staff Terminal', role: 'cashier' }) : userProfile;
+  const currentRole = normalizeRole(effectiveProfile?.role);
 
   return (
     <AuthContext.Provider value={{ 
       currentUser, 
-      userProfile, 
+      userProfile: effectiveProfile,
+      rawUserProfile: userProfile,
+      terminalStaff,
+      isSharedTerminal,
+      isTerminalLocked,
+      unlockTerminalStaff,
+      lockTerminalStaff,
       loading, 
       signIn, 
       signOut, 
