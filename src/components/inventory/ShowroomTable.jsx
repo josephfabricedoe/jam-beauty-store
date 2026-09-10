@@ -6,13 +6,13 @@ import ProductForm from './ProductForm';
 import BarcodeLabelModal from './BarcodeLabelModal';
 import {
   AlertTriangle, FlaskConical, Edit2, PlusCircle, Download,
-  Search, ChevronDown, ChevronRight, Image as ImageIcon, Package, Filter, X, Tag
+  Search, ChevronDown, ChevronRight, Image as ImageIcon, Package, Filter, X, Tag, Boxes
 } from 'lucide-react';
 import { downloadCSV } from '../../utils/exportCsv';
 
 const ALL_CATEGORIES = ['All', 'Perfume', 'Cosmetics', 'Skincare', 'Haircare', 'Accessories', 'Body Care', 'Other'];
 
-export default function ShowroomTable() {
+export default function ShowroomTable({ onRestockClick }) {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editProduct, setEditProduct] = useState(null);
@@ -274,6 +274,12 @@ export default function ShowroomTable() {
                             {/* Product Name */}
                             <td className="px-3 py-2">
                               <div className="font-semibold text-white text-xs">{p.name}</div>
+                              {p.supplierName && (
+                                <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+                                  <span className="text-slate-500">Supplier:</span>
+                                  <span className="text-slate-300 font-medium">{p.supplierName}</span>
+                                </div>
+                              )}
                               {(p.isTester || p.isDamaged) && (
                                 <div className="flex gap-1 mt-0.5">
                                   {p.isTester && <span className="text-[10px] bg-purple-900/50 text-purple-300 px-1.5 py-0.2 rounded">Tester</span>}
@@ -305,9 +311,19 @@ export default function ShowroomTable() {
                               {format(p.dozenPrice)}
                             </td>
 
-                            {/* Manual Edit Action */}
+                            {/* Actions: Restock + Edit + Barcode + Tester */}
                             <td className="px-3 py-2">
                               <div className="flex items-center justify-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => onRestockClick ? onRestockClick(p) : null}
+                                  title="1-Click Restock with Supplier"
+                                  className="flex items-center gap-1 px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white rounded-lg text-xs font-semibold transition-colors"
+                                >
+                                  <Boxes className="w-3 h-3" />
+                                  <span>Restock</span>
+                                </button>
+
                                 <button
                                   type="button"
                                   onClick={() => setEditProduct(p)}

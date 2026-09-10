@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Modal from '../shared/Modal';
 import { useCurrency } from '../../hooks/useCurrency';
 import { useAuth } from '../../hooks/useAuth';
-import { collection, addDoc, doc, updateDoc, increment, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, doc, updateDoc, increment, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { compressReceiptImage } from '../../utils/receiptCompressor';
 import { 
@@ -22,7 +22,10 @@ import {
   ShieldAlert,
   ShieldCheck,
   Ship,
-  Globe
+  Globe,
+  Boxes,
+  Phone,
+  Save
 } from 'lucide-react';
 
 const TRADE_HUBS = [
@@ -45,11 +48,47 @@ export default function RestockOrderModal({
   isOpen, 
   onClose, 
   supplier = null, 
-  products = [], 
+  targetProduct = null,
+  products: propProducts = [], 
+  suppliers: propSuppliers = [],
   prefilledItems = [] 
 }) {
   const { format } = useCurrency();
   const { currentUser } = useAuth();
+
+  // Internal collections if not passed via props
+  const [liveProducts, setLiveProducts] = useState([]);
+  const [liveSuppliers, setLiveSuppliers] = useState([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let unsubProd = null;
+    let unsubSupp = null;
+
+    if (!propProducts || propProducts.length === 0) {
+      unsubProd = onSnapshot(collection(db, 'products'), snap => {
+        setLiveProducts(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+    }
+    if (!propSuppliers || propSuppliers.length === 0) {
+      unsubSupp = onSnapshot(collection(db, 'suppliers'), snap => {
+        setLiveSuppliers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+    }
+
+    return () => {
+      if (unsubProd) unsubProd();
+      if (unsubSupp) unsubSupp();
+    };
+  }, [isOpen, propProducts, propSuppliers]);
+
+  const allProducts = propProducts.length > 0 ? propProducts : liveProducts;
+  const allSuppliers = propSuppliers.length > 0 ? propSuppliers : liveSuppliers;
+
+  // Active supplier state
+  const [activeSupplier, setActiveSupplier] = useState(supplier);
+  const [supplierPhoneInput, setSupplierPhoneInput] = useState('');
+  const [savingPhone, setSavingPhone] = useState(false);
 
   const [items, setItems] = useState([]);
   const [notes, setNotes] = useState('');
@@ -66,56 +105,98 @@ export default function RestockOrderModal({
   const [successMsg, setSuccessMsg] = useState('');
   const [error, setError] = useState('');
 
+  // Determine activeSupplier & initial items upon opening
   useEffect(() => {
-    if (isOpen) {
-      if (prefilledItems && prefilledItems.length > 0) {
-        setItems(prefilledItems.map(p => ({
-          productId: p.id,
-          name: p.name,
-          category: p.category || '',
-          currentStock: (p.showroomQty || 0) + (p.storeroomQty || 0),
-          reorderTrigger: p.reorderTrigger || 10,
-          costPrice: p.costPrice != null ? Number(p.costPrice) : 0,
-          orderQty: Math.max(12, (p.reorderTrigger || 10) * 2 - ((p.showroomQty || 0) + (p.storeroomQty || 0))),
-        })));
-      } else {
-        const relevant = products.filter(p => {
-          const totalStock = (p.showroomQty || 0) + (p.storeroomQty || 0);
-          const isLow = totalStock <= (p.reorderTrigger || 10);
-          if (supplier) {
-            return p.supplierId === supplier.id || (isLow && !p.supplierId);
-          }
-          return isLow;
-        });
+    if (!isOpen) return;
 
-        setItems(relevant.map(p => ({
-          productId: p.id,
-          name: p.name,
-          category: p.category || '',
-          currentStock: (p.showroomQty || 0) + (p.storeroomQty || 0),
-          reorderTrigger: p.reorderTrigger || 10,
-          costPrice: p.costPrice != null ? Number(p.costPrice) : 0,
-          orderQty: Math.max(12, (p.reorderTrigger || 10) * 2 - ((p.showroomQty || 0) + (p.storeroomQty || 0))),
-        })));
+    let matchedSupplier = supplier;
+    if (!matchedSupplier && targetProduct) {
+      if (targetProduct.supplierId) {
+        matchedSupplier = allSuppliers.find(s => s.id === targetProduct.supplierId);
       }
-
-      // Auto-detect hub from supplier notes/address if available
-      if (supplier) {
-        const sText = `${supplier.address || ''} ${supplier.notes || ''} ${supplier.name || ''}`.toLowerCase();
-        if (sText.includes('china')) setSelectedHub('china');
-        else if (sText.includes('nigeria') || sText.includes('lagos')) setSelectedHub('nigeria');
-        else if (sText.includes('ghana') || sText.includes('accra')) setSelectedHub('ghana');
-        else if (sText.includes('ivory') || sText.includes('abidjan')) setSelectedHub('ivory_coast');
-        else setSelectedHub('dubai');
+      if (!matchedSupplier && targetProduct.supplierName) {
+        matchedSupplier = allSuppliers.find(
+          s => (s.name || '').trim().toLowerCase() === targetProduct.supplierName.trim().toLowerCase()
+        );
       }
-
-      setNotes('');
-      setShippingFeeUSD('');
-      setReceiptImage(null);
-      setError('');
-      setSuccessMsg('');
+      if (!matchedSupplier) {
+        matchedSupplier = {
+          id: targetProduct.supplierId || 'unassigned',
+          name: targetProduct.supplierName || 'Primary Supplier',
+          phone: '',
+          email: '',
+          terms: 'COD',
+        };
+      }
     }
-  }, [isOpen, supplier, products, prefilledItems]);
+    setActiveSupplier(matchedSupplier || null);
+    setSupplierPhoneInput(matchedSupplier?.phone || '');
+
+    // Initialize items
+    if (targetProduct) {
+      const showQty = targetProduct.showroomQty || 0;
+      const storeQty = targetProduct.storeroomQty || 0;
+      const totStock = showQty + storeQty;
+      const trig = targetProduct.reorderTrigger || 10;
+      const suggestedQty = Math.max(12, (trig * 2) - totStock);
+
+      setItems([{
+        productId: targetProduct.id,
+        name: targetProduct.name,
+        category: targetProduct.category || '',
+        currentStock: totStock,
+        reorderTrigger: trig,
+        costPrice: targetProduct.costPrice != null ? Number(targetProduct.costPrice) : 0,
+        orderQty: suggestedQty,
+      }]);
+    } else if (prefilledItems && prefilledItems.length > 0) {
+      setItems(prefilledItems.map(p => ({
+        productId: p.id,
+        name: p.name,
+        category: p.category || '',
+        currentStock: (p.showroomQty || 0) + (p.storeroomQty || 0),
+        reorderTrigger: p.reorderTrigger || 10,
+        costPrice: p.costPrice != null ? Number(p.costPrice) : 0,
+        orderQty: Math.max(12, (p.reorderTrigger || 10) * 2 - ((p.showroomQty || 0) + (p.storeroomQty || 0))),
+      })));
+    } else {
+      const relevant = allProducts.filter(p => {
+        const totalStock = (p.showroomQty || 0) + (p.storeroomQty || 0);
+        const isLow = totalStock <= (p.reorderTrigger || 10);
+        if (matchedSupplier) {
+          return p.supplierId === matchedSupplier.id || (isLow && !p.supplierId);
+        }
+        return isLow;
+      });
+
+      setItems(relevant.map(p => ({
+        productId: p.id,
+        name: p.name,
+        category: p.category || '',
+        currentStock: (p.showroomQty || 0) + (p.storeroomQty || 0),
+        reorderTrigger: p.reorderTrigger || 10,
+        costPrice: p.costPrice != null ? Number(p.costPrice) : 0,
+        orderQty: Math.max(12, (p.reorderTrigger || 10) * 2 - ((p.showroomQty || 0) + (p.storeroomQty || 0))),
+      })));
+    }
+
+    // Auto-detect hub from supplier notes/address if available
+    if (matchedSupplier) {
+      const sText = `${matchedSupplier.address || ''} ${matchedSupplier.notes || ''} ${matchedSupplier.name || ''}`.toLowerCase();
+      if (sText.includes('china') || sText.includes('guangzhou') || sText.includes('yiwu')) setSelectedHub('china');
+      else if (sText.includes('nigeria') || sText.includes('lagos')) setSelectedHub('nigeria');
+      else if (sText.includes('ghana') || sText.includes('accra')) setSelectedHub('ghana');
+      else if (sText.includes('ivory') || sText.includes('abidjan') || sText.includes('côte')) setSelectedHub('ivory_coast');
+      else if (sText.includes('liberia') || sText.includes('monrovia')) setSelectedHub('liberia');
+      else setSelectedHub('dubai');
+    }
+
+    setNotes('');
+    setShippingFeeUSD('');
+    setReceiptImage(null);
+    setError('');
+    setSuccessMsg('');
+  }, [isOpen, supplier, targetProduct, prefilledItems, allProducts.length, allSuppliers.length]);
 
   const updateItemQty = (index, qty) => {
     const val = Math.max(0, parseInt(qty, 10) || 0);
@@ -140,9 +221,15 @@ export default function RestockOrderModal({
   };
 
   const handleAddProduct = (productId) => {
-    const p = products.find(prod => prod.id === productId);
+    const p = allProducts.find(prod => prod.id === productId);
     if (!p) return;
     if (items.some(it => it.productId === p.id)) return;
+
+    const showQty = p.showroomQty || 0;
+    const storeQty = p.storeroomQty || 0;
+    const totStock = showQty + storeQty;
+    const trig = p.reorderTrigger || 10;
+    const suggestedQty = Math.max(12, (trig * 2) - totStock);
 
     setItems(prev => [
       ...prev,
@@ -150,13 +237,64 @@ export default function RestockOrderModal({
         productId: p.id,
         name: p.name,
         category: p.category || '',
-        currentStock: (p.showroomQty || 0) + (p.storeroomQty || 0),
-        reorderTrigger: p.reorderTrigger || 10,
+        currentStock: totStock,
+        reorderTrigger: trig,
         costPrice: p.costPrice != null ? Number(p.costPrice) : 0,
-        orderQty: 12,
+        orderQty: suggestedQty,
       }
     ]);
   };
+
+  const handleAddAllSupplierProducts = (prodsToAdd) => {
+    const newItems = prodsToAdd.map(p => {
+      const showQty = p.showroomQty || 0;
+      const storeQty = p.storeroomQty || 0;
+      const totStock = showQty + storeQty;
+      const trig = p.reorderTrigger || 10;
+      return {
+        productId: p.id,
+        name: p.name,
+        category: p.category || '',
+        currentStock: totStock,
+        reorderTrigger: trig,
+        costPrice: p.costPrice != null ? Number(p.costPrice) : 0,
+        orderQty: Math.max(12, (trig * 2) - totStock),
+      };
+    });
+    setItems(prev => [...prev, ...newItems]);
+  };
+
+  const handleSaveSupplierPhone = async () => {
+    if (!supplierPhoneInput.trim()) return;
+    setSavingPhone(true);
+    try {
+      if (activeSupplier?.id && activeSupplier.id !== 'unassigned') {
+        await updateDoc(doc(db, 'suppliers', activeSupplier.id), {
+          phone: supplierPhoneInput.trim(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+      setActiveSupplier(prev => ({ ...(prev || {}), phone: supplierPhoneInput.trim() }));
+    } catch (err) {
+      console.error('Error saving supplier phone:', err);
+    } finally {
+      setSavingPhone(false);
+    }
+  };
+
+  // Find all other products supplied by this same vendor
+  const sameSupplierProducts = useMemo(() => {
+    const sId = activeSupplier?.id;
+    const sName = (activeSupplier?.name || targetProduct?.supplierName || '').trim().toLowerCase();
+    if (!sId && !sName) return [];
+
+    return allProducts.filter(p => {
+      if (items.some(it => it.productId === p.id)) return false;
+      const matchId = sId && sId !== 'unassigned' && p.supplierId === sId;
+      const matchName = sName && p.supplierName && p.supplierName.trim().toLowerCase() === sName;
+      return matchId || matchName;
+    });
+  }, [allProducts, items, activeSupplier, targetProduct]);
 
   const handleReceiptFile = async (e) => {
     const file = e.target.files?.[0];
@@ -189,7 +327,6 @@ export default function RestockOrderModal({
   const requiresReceipt = isHighValue && paymentSource !== 'credit';
 
   // Process Restock Order
-  // mode: 'in_transit' (goods dispatched overseas) | 'instant_receive' (already in Monrovia)
   const handleProcessOrder = async (mode = 'in_transit') => {
     if (items.length === 0) {
       setError('Please include at least one item to restock.');
@@ -212,16 +349,15 @@ export default function RestockOrderModal({
     try {
       const poNumber = `PO-${Date.now().toString().slice(-6)}`;
       const activeHub = TRADE_HUBS.find(h => h.id === selectedHub) || TRADE_HUBS[0];
-
       const isInstant = mode === 'instant_receive';
 
       const orderData = {
         poNumber,
-        supplierId: supplier?.id || 'unassigned',
-        supplierName: supplier?.name || 'International Partner',
-        supplierPhone: supplier?.phone || '',
-        supplierEmail: supplier?.email || '',
-        supplierTerms: supplier?.terms || 'COD',
+        supplierId: activeSupplier?.id || 'unassigned',
+        supplierName: activeSupplier?.name || targetProduct?.supplierName || 'International Partner',
+        supplierPhone: activeSupplier?.phone || supplierPhoneInput || '',
+        supplierEmail: activeSupplier?.email || '',
+        supplierTerms: activeSupplier?.terms || 'COD',
         originHub: activeHub.name,
         originFlag: activeHub.flag,
         expectedLeadTime: activeHub.leadTime,
@@ -267,7 +403,7 @@ export default function RestockOrderModal({
           freightCost,
           currency: 'USD',
           paymentMethod: paymentSource,
-          recipient: `${supplier?.name || 'Supplier'} (${activeHub.flag} ${activeHub.name})`,
+          recipient: `${activeSupplier?.name || targetProduct?.supplierName || 'Supplier'} (${activeHub.flag} ${activeHub.name})`,
           authorizedBy: currentUser?.displayName || 'Store Manager',
           note: `Restock ${poNumber} (${totalItemUnits} units, ${items.length} items from ${activeHub.name})`,
           isRestockPayment: true,
@@ -302,12 +438,12 @@ export default function RestockOrderModal({
   // Send WhatsApp Purchase Order
   const handleShareWhatsApp = () => {
     if (items.length === 0) return;
-    const phone = supplier?.phone ? supplier.phone.replace(/[^0-9]/g, '') : '';
-    const phoneWithCode = phone.startsWith('231') ? phone : `231${phone.replace(/^0+/, '')}`;
+    const rawPhone = (activeSupplier?.phone || supplierPhoneInput || '').replace(/[^0-9]/g, '');
+    const phoneWithCode = rawPhone ? (rawPhone.startsWith('231') ? rawPhone : `231${rawPhone.replace(/^0+/, '')}`) : '';
     const activeHub = TRADE_HUBS.find(h => h.id === selectedHub) || TRADE_HUBS[0];
 
     let msg = `*PURCHASE & RESTOCK ORDER - JAM BEAUTY STORE*\n`;
-    msg += `Supplier: ${supplier?.name || 'Partner Supplier'}\n`;
+    msg += `Supplier: ${activeSupplier?.name || targetProduct?.supplierName || 'Partner Supplier'}\n`;
     msg += `Origin Trade Hub: ${activeHub.flag} ${activeHub.name}\n`;
     msg += `Date: ${new Date().toLocaleDateString()}\n`;
     msg += `Payment Mode: ${PAYMENT_SOURCES.find(s => s.id === paymentSource)?.label || paymentSource}\n`;
@@ -332,24 +468,22 @@ export default function RestockOrderModal({
     }
     msg += `\nPlease confirm packaging and dispatch schedule to Monrovia, Liberia. Thank you!`;
 
-    const url = phone
+    const url = phoneWithCode
       ? `https://wa.me/${phoneWithCode}?text=${encodeURIComponent(msg)}`
       : `https://wa.me/?text=${encodeURIComponent(msg)}`;
 
     window.open(url, '_blank');
   };
 
-  const remainingProducts = products.filter(
+  const remainingProducts = allProducts.filter(
     p => !items.some(it => it.productId === p.id)
   );
-
-  const activeHub = TRADE_HUBS.find(h => h.id === selectedHub) || TRADE_HUBS[0];
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={supplier ? `International Restock: ${supplier.name}` : 'Generate Overseas Restock Order'}
+      title={activeSupplier ? `Restock: ${activeSupplier.name}` : (targetProduct ? `Restock: ${targetProduct.name}` : 'Generate Restock Order')}
     >
       <div className="space-y-4 max-h-[80vh] overflow-y-auto pr-1 text-xs">
         {error && (
@@ -363,6 +497,37 @@ export default function RestockOrderModal({
           <div className="flex items-center gap-2 p-3 bg-emerald-500/20 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs">
             <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
             <span>{successMsg}</span>
+          </div>
+        )}
+
+        {/* Missing Phone Quick-Update for Supplier */}
+        {activeSupplier && !activeSupplier.phone && (
+          <div className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-2xl flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Phone className="w-4 h-4 text-amber-400 flex-shrink-0" />
+              <div>
+                <span className="font-semibold text-amber-200 block">No WhatsApp Number for {activeSupplier.name}</span>
+                <span className="text-[10px] text-slate-400">Enter phone once to enable 1-click WhatsApp order dispatch:</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <input
+                type="text"
+                value={supplierPhoneInput}
+                onChange={e => setSupplierPhoneInput(e.target.value)}
+                placeholder="e.g. 0770000000 or +231..."
+                className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 flex-1 sm:w-44"
+              />
+              <button
+                type="button"
+                onClick={handleSaveSupplierPhone}
+                disabled={savingPhone || !supplierPhoneInput.trim()}
+                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors"
+              >
+                <Save className="w-3 h-3" />
+                <span>{savingPhone ? 'Saving...' : 'Save'}</span>
+              </button>
+            </div>
           </div>
         )}
 
@@ -394,10 +559,53 @@ export default function RestockOrderModal({
           </div>
         </div>
 
-        {/* Add Product Dropdown */}
+        {/* 1-CLICK SAME SUPPLIER PRODUCTS BUNDLING */}
+        {sameSupplierProducts.length > 0 && (
+          <div className="p-3 bg-rose-950/20 border border-rose-500/40 rounded-2xl space-y-2">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-1.5 font-bold text-rose-300 text-xs">
+                <Boxes className="w-4 h-4 text-rose-400" />
+                <span>Other Products from {activeSupplier?.name || targetProduct?.supplierName} ({sameSupplierProducts.length})</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAddAllSupplierProducts(sameSupplierProducts)}
+                className="px-2.5 py-1 bg-rose-500 hover:bg-rose-400 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors shadow-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Add All ({sameSupplierProducts.length}) to Restock</span>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Bundle items from the same supplier to ship together and minimize freight handling:
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
+              {sameSupplierProducts.map(p => (
+                <div key={p.id} className="p-2 bg-slate-900/80 border border-slate-800 rounded-xl flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-white font-medium text-xs truncate">{p.name}</div>
+                    <div className="text-[10px] text-slate-400 flex items-center gap-2">
+                      <span>Stock: {(p.showroomQty || 0) + (p.storeroomQty || 0)}</span>
+                      <span>Cost: {format(p.costPrice || 0)}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleAddProduct(p.id)}
+                    className="px-2 py-1 bg-slate-800 hover:bg-rose-500 text-slate-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-0.5 flex-shrink-0 transition-colors"
+                  >
+                    <Plus className="w-3 h-3" /> Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Add Other Products from Catalog Dropdown */}
         {remainingProducts.length > 0 && (
           <div>
-            <label className="text-slate-400 font-medium mb-1 block">Add Products to Restock</label>
+            <label className="text-slate-400 font-medium mb-1 block">Add Other Catalog Products to this Order</label>
             <select
               onChange={(e) => {
                 if (e.target.value) {
@@ -411,7 +619,7 @@ export default function RestockOrderModal({
               <option value="" disabled>+ Choose product from catalog...</option>
               {remainingProducts.map(p => (
                 <option key={p.id} value={p.id}>
-                  {p.name} (Stock: {(p.showroomQty || 0) + (p.storeroomQty || 0)} / Min: {p.reorderTrigger || 10})
+                  {p.name} {p.supplierName ? `[${p.supplierName}]` : ''} (Stock: {(p.showroomQty || 0) + (p.storeroomQty || 0)} / Min: {p.reorderTrigger || 10})
                 </option>
               ))}
             </select>

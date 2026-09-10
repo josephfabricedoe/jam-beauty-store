@@ -3,6 +3,7 @@ import ShowroomTable from './ShowroomTable';
 import StoreroomTable from './StoreroomTable';
 import TransferModal from './TransferModal';
 import CSVImport from './CSVImport';
+import RestockOrderModal from '../suppliers/RestockOrderModal';
 import { useAuth } from '../../hooks/useAuth';
 import { Store, Warehouse, Upload } from 'lucide-react';
 
@@ -14,6 +15,7 @@ const TABS = [
 export default function InventoryView() {
   const [tab, setTab] = useState('showroom');
   const [transferProduct, setTransferProduct] = useState(null);
+  const [restockProduct, setRestockProduct] = useState(null);
   const [showImport, setShowImport] = useState(false);
   const { userProfile } = useAuth();
   const isAdmin = userProfile?.role === 'admin';
@@ -55,14 +57,25 @@ export default function InventoryView() {
       )}
 
       <div className="bg-slate-800/50 border border-slate-700 rounded-2xl overflow-hidden">
-        {tab === 'showroom' && <ShowroomTable />}
-        {tab === 'storeroom' && <StoreroomTable onTransferClick={setTransferProduct} />}
+        {tab === 'showroom' && <ShowroomTable onRestockClick={setRestockProduct} />}
+        {tab === 'storeroom' && (
+          <StoreroomTable 
+            onTransferClick={setTransferProduct} 
+            onRestockClick={setRestockProduct}
+          />
+        )}
       </div>
 
       <TransferModal
         isOpen={!!transferProduct}
         onClose={() => setTransferProduct(null)}
         product={transferProduct}
+      />
+
+      <RestockOrderModal
+        isOpen={!!restockProduct}
+        onClose={() => setRestockProduct(null)}
+        targetProduct={restockProduct}
       />
     </div>
   );

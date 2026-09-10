@@ -185,12 +185,15 @@ export default function SuppliersView() {
       ? (activeWithLeadTime.reduce((sum, s) => sum + Number(s.leadTimeDays), 0) / activeWithLeadTime.length).toFixed(1)
       : '—';
 
+    const needsInfoCount = activeSuppliersList.filter(s => !s.phone && !s.email).length;
+
     return {
       activeCount: activeSuppliersList.length,
       linkedCount: suppliersWithLinkedItemsCount,
       avgLeadTime,
       deactivatedCount: deactivatedSuppliersList.length,
       totalCount: suppliers.length,
+      needsInfoCount,
     };
   }, [suppliers, products]);
 
@@ -498,6 +501,20 @@ export default function SuppliersView() {
       {/* VIEW 1: SUPPLIER DIRECTORY */}
       {viewTab === 'directory' && (
         <div className="space-y-3">
+          {stats.needsInfoCount > 0 && (
+            <div className="p-3 bg-amber-950/30 border border-amber-500/40 rounded-2xl flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-amber-300">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                <span>
+                  <strong>{stats.needsInfoCount} supplier{stats.needsInfoCount > 1 ? 's' : ''}</strong> auto-created from CSV inventory upload need contact details (Phone/WhatsApp, location, email).
+                </span>
+              </div>
+              <span className="text-[11px] text-slate-400">
+                Click <strong>"+ Add Info"</strong> on any row to complete profile for 1-click ordering.
+              </span>
+            </div>
+          )}
+
           {/* Status Filter Tabs & Search Bar */}
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-3 space-y-3">
             {/* Filter pills matching screenshot */}
@@ -617,7 +634,17 @@ export default function SuppliersView() {
                               </div>
                             )}
                             {!supplier.contactPerson && !supplier.phone && !supplier.email && (
-                              <span className="text-slate-600">—</span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedSupplierForEdit(supplier);
+                                  setIsSupplierModalOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1 text-[11px] text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded-lg transition-colors font-semibold"
+                              >
+                                <AlertTriangle className="w-3 h-3" />
+                                <span>+ Add Info (Phone/Location)</span>
+                              </button>
                             )}
                           </td>
 
@@ -1085,6 +1112,7 @@ export default function SuppliersView() {
         }}
         supplier={selectedSupplierForRestock}
         products={products}
+        suppliers={suppliers}
         prefilledItems={prefilledRestockItems}
       />
     </div>

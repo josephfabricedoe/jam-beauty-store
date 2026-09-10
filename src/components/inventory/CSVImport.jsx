@@ -1,8 +1,8 @@
 import React, { useState, useRef } from 'react';
 import Papa from 'papaparse';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, serverTimestamp, collection, getDocs, addDoc } from 'firebase/firestore';
 import { db } from '../../firebase/config';
-import { Upload, FileText, CheckCircle, AlertCircle, X, Download } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, X, Download, Boxes } from 'lucide-react';
 
 function findField(row, candidates) {
   const keys = Object.keys(row);
@@ -23,6 +23,7 @@ export default function CSVImport() {
   const [progress, setProgress] = useState(0);
   const [done, setDone] = useState(false);
   const [importedCount, setImportedCount] = useState(0);
+  const [newSuppliersCount, setNewSuppliersCount] = useState(0);
   const [error, setError] = useState('');
   const inputRef = useRef(null);
 
@@ -66,59 +67,118 @@ export default function CSVImport() {
       complete: async (res) => {
         const rows = res.data;
         let count = 0;
+        let suppliersCreated = 0;
         const errs = [];
 
-        for (let i = 0; i < rows.length; i++) {
-          const row = rows[i];
-          try {
-            let barcode = findField(row, ['barcode', 'sku', 'sku_number', 'upc', 'code', 'id']);
-            const name = findField(row, ['name', 'productName', 'product_name', 'product', 'item', 'description', 'title']);
-            const category = findField(row, ['category', 'type', 'group']) || 'Other';
-            const retailPrice = parseFloat(findField(row, ['retailPrice', 'retail_price', 'retail', 'price', 'rate']).replace(/[^0-9.]/g, '')) || 0;
-            const halfDozenPrice = parseFloat(findField(row, ['halfDozenPrice', 'half_dozen_price', 'halfDozen', '6x', 'wholesale_6']).replace(/[^0-9.]/g, '')) || 0;
-            const dozenPrice = parseFloat(findField(row, ['dozenPrice', 'dozen_price', 'dozen', '12x', 'wholesale_12']).replace(/[^0-9.]/g, '')) || 0;
-            const costPrice = parseFloat(findField(row, ['costPrice', 'cost_price', 'cost', 'purchase_price']).replace(/[^0-9.]/g, '')) || 0;
-            const showroomQty = parseInt(findField(row, ['showroomQty', 'showroom_qty', 'showroom', 'stock', 'qty', 'quantity']), 10) || 0;
-            const storeroomQty = parseInt(findField(row, ['storeroomQty', 'storeroom_qty', 'storeroom', 'warehouse_qty', 'warehouse']), 10) || 0;
-            const reorderTrigger = parseInt(findField(row, ['reorderTrigger', 'reorder_trigger', 'reorder_level', 'min_stock']), 10) || 10;
-
-            if (!name) {
-              continue; // skip rows without a product name
+        try {
+          // Pre-fetch existing suppliers to avoid duplicates
+          const existingSuppliersSnap = await getDocs(collection(db, 'suppliers'));
+          const suppliersMap = new Map();
+          existingSuppliersSnap.docs.forEach(d => {
+            const s = d.data();
+            if (s.name) {
+              suppliersMap.set(s.name.trim().toLowerCase(), { id: d.id, name: s.name.trim() });
             }
+          });
 
-            // If no barcode provided, generate a predictable unique SKU
-            if (!barcode) {
-              barcode = `SKU-${Date.now().toString().slice(-6)}-${count + 1}`;
+          for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            try {
+              let barcode = findField(row, ['barcode', 'sku', 'sku_number', 'upc', 'code', 'id']);
+              const name = findField(row, ['name', 'productName', 'product_name', 'product', 'item', 'description', 'title']);
+              const category = findField(row, ['category', 'type', 'group']) || 'Other';
+              const supplierRaw = findField(row, ['supplier', 'supplierName', 'supplier_name', 'vendor', 'distributor', 'source']);
+              const retailPrice = parseFloat(findField(row, ['retailPrice', 'retail_price', 'retail', 'price', 'rate']).replace(/[^0-9.]/g, '')) || 0;
+              const halfDozenPrice = parseFloat(findField(row, ['halfDozenPrice', 'half_dozen_price', 'halfDozen', '6x', 'wholesale_6']).replace(/[^0-9.]/g, '')) || 0;
+              const dozenPrice = parseFloat(findField(row, ['dozenPrice', 'dozen_price', 'dozen', '12x', 'wholesale_12']).replace(/[^0-9.]/g, '')) || 0;
+              const costPrice = parseFloat(findField(row, ['costPrice', 'cost_price', 'cost', 'purchase_price']).replace(/[^0-9.]/g, '')) || 0;
+              const showroomQty = parseInt(findField(row, ['showroomQty', 'showroom_qty', 'showroom', 'stock', 'qty', 'quantity']), 10) || 0;
+              const storeroomQty = parseInt(findField(row, ['storeroomQty', 'storeroom_qty', 'storeroom', 'warehouse_qty', 'warehouse']), 10) || 0;
+              const reorderTrigger = parseInt(findField(row, ['reorderTrigger', 'reorder_trigger', 'reorder_level', 'min_stock']), 10) || 10;
+
+              if (!name) {
+                continue; // skip rows without a product name
+              }
+
+              // Auto-harvest Supplier from CSV column
+              let supplierId = '';
+              let supplierName = '';
+
+              if (supplierRaw) {
+                const cleanSupp = supplierRaw.trim();
+                const key = cleanSupp.toLowerCase();
+                if (suppliersMap.has(key)) {
+                  supplierId = suppliersMap.get(key).id;
+                  supplierName = suppliersMap.get(key).name;
+                } else {
+                  // Auto-create supplier in Firestore
+                  const newSuppRef = await addDoc(collection(db, 'suppliers'), {
+                    name: cleanSupp,
+                    code: `SUP-${Math.floor(1000 + Math.random() * 9000)}`,
+                    contactPerson: '',
+                    phone: '',
+                    email: '',
+                    address: '',
+                    terms: 'COD',
+                    leadTimeDays: cleanSupp.toLowerCase().includes('china') || cleanSupp.toLowerCase().includes('dubai') ? 28 : 14,
+                    active: true,
+                    notes: 'Auto-harvested from Inventory CSV upload',
+                    createdAt: serverTimestamp(),
+                    updatedAt: serverTimestamp(),
+                  });
+                  supplierId = newSuppRef.id;
+                  supplierName = cleanSupp;
+                  suppliersMap.set(key, { id: supplierId, name: supplierName });
+                  suppliersCreated++;
+                }
+              }
+
+              // If no barcode provided, generate a predictable unique SKU
+              if (!barcode) {
+                barcode = `SKU-${Date.now().toString().slice(-6)}-${count + 1}`;
+              }
+
+              const productData = {
+                barcode,
+                name,
+                category,
+                retailPrice,
+                halfDozenPrice: halfDozenPrice || (retailPrice * 0.9),
+                dozenPrice: dozenPrice || (retailPrice * 0.85),
+                costPrice,
+                showroomQty,
+                storeroomQty,
+                reorderTrigger,
+                isTester: false,
+                isDamaged: false,
+                updatedAt: serverTimestamp(),
+              };
+
+              if (supplierId) {
+                productData.supplierId = supplierId;
+                productData.supplierName = supplierName;
+              }
+
+              await setDoc(doc(db, 'products', barcode), productData, { merge: true });
+
+              count++;
+              setProgress(Math.round((count / rows.length) * 100));
+            } catch (e) {
+              errs.push(`Row ${i + 1}: ${e.message}`);
             }
-
-            await setDoc(doc(db, 'products', barcode), {
-              barcode,
-              name,
-              category,
-              retailPrice,
-              halfDozenPrice: halfDozenPrice || (retailPrice * 0.9),
-              dozenPrice: dozenPrice || (retailPrice * 0.85),
-              costPrice,
-              showroomQty,
-              storeroomQty,
-              reorderTrigger,
-              isTester: false,
-              isDamaged: false,
-              updatedAt: serverTimestamp(),
-            }, { merge: true });
-
-            count++;
-            setProgress(Math.round((count / rows.length) * 100));
-          } catch (e) {
-            errs.push(`Row ${i + 1}: ${e.message}`);
           }
-        }
 
-        setImporting(false);
-        setDone(true);
-        setImportedCount(count);
-        setFile(null);
-        setPreview([]);
+          setImporting(false);
+          setDone(true);
+          setImportedCount(count);
+          setNewSuppliersCount(suppliersCreated);
+          setFile(null);
+          setPreview([]);
+        } catch (globalErr) {
+          console.error('Import error:', globalErr);
+          setError('Import failed: ' + globalErr.message);
+          setImporting(false);
+        }
       },
     });
   };
@@ -210,9 +270,16 @@ export default function CSVImport() {
       )}
 
       {done && (
-        <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-sm flex items-center gap-2">
-          <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
-          <span>Successfully imported {importedCount} products into your Inventory!</span>
+        <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-500/40 text-emerald-300 text-sm space-y-1">
+          <div className="flex items-center gap-2 font-bold">
+            <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+            <span>Successfully imported {importedCount} products into your Inventory!</span>
+          </div>
+          {newSuppliersCount > 0 && (
+            <p className="text-xs text-emerald-400/90 pl-7">
+              ⚡ <strong>{newSuppliersCount} new supplier{newSuppliersCount > 1 ? 's' : ''}</strong> were automatically harvested into the <strong>Suppliers</strong> tab. You can now add their phone numbers, locations, and lead times for 1-click restock ordering.
+            </p>
+          )}
         </div>
       )}
     </div>
